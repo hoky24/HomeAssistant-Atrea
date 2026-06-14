@@ -218,7 +218,11 @@ class AtreaDevice(ClimateEntity):
         attributes["alerts"] = self._alerts
         attributes["program"] = self.air_handling_control
         attributes["active_inputs"] = self._active_inputs
-        attributes["forced_mode"] = self._forced_mode.name
+        # _forced_mode is only assigned when a status read succeeds; it stays
+        # None if the unit was unreachable at startup, so guard the .name deref.
+        attributes["forced_mode"] = (
+            self._forced_mode.name if self._forced_mode is not None else None
+        )
         attributes["current_power"] = self._current_power
 
         if self._heating == 1:
@@ -249,6 +253,10 @@ class AtreaDevice(ClimateEntity):
 
     @property
     def preset_mode(self):
+        # getMode() returns None when the unit is unreachable or reports an
+        # unexpected register set; avoid dereferencing .name on None.
+        if self._current_preset is None:
+            return STATE_UNKNOWN
         if self._current_preset.name and self._current_preset.name in self._userLabels:
             return self._userLabels[self._current_preset.name]
         elif self._current_preset < len(ALL_PRESET_LIST):
@@ -288,10 +296,15 @@ class AtreaDevice(ClimateEntity):
     async def async_update(self):
         if not self.updatePending:
             self.updatePending = True
-            await self._coordinator.async_request_refresh()
-            await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-            self.manualUpdate()
-            self.updatePending = False
+            # try/finally: if manualUpdate() raises (e.g. partial status),
+            # updatePending must still be cleared, otherwise this guard stays
+            # True forever and the entity silently stops updating until restart.
+            try:
+                await self._coordinator.async_request_refresh()
+                await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
+                self.manualUpdate()
+            finally:
+                self.updatePending = False
 
     def manualUpdate(self, updateState=True):
         status = self.data["status"]
@@ -397,12 +410,15 @@ class AtreaDevice(ClimateEntity):
 
             # todo fix warning not translated
             params = self.atrea.getParams()
+            # status.get(): a warning/alert id listed in params may be absent
+            # from a partial status response, which would KeyError and (without
+            # the try/finally above) wedge updates permanently.
             for warning in params["warning"]:
-                if status[warning] == "1":
+                if status.get(warning) == "1":
                     self._warnings.append(self.atrea.getTranslation(warning))
 
             for alert in params["alert"]:
-                if status[alert] == "1":
+                if status.get(alert) == "1":
                     self._alerts.append(self.atrea.getTranslation(alert))
 
         else:
