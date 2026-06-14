@@ -8,16 +8,30 @@ turn_on/off) are added in a later task.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import HVACAction, HVACMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME, UnitOfTemperature
+from homeassistant.const import (
+    ATTR_TEMPERATURE,
+    CONF_IP_ADDRESS,
+    CONF_NAME,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
-from pyatrea import AtreaMode, AtreaProgram, AtreaStatus
+from pyatrea import (
+    AtreaConnectionError,
+    AtreaMode,
+    AtreaParams,
+    AtreaProgram,
+    AtreaStatus,
+    CommandBuilder,
+)
 from pyatrea.parser import translate
 
 from .const import (
@@ -483,3 +497,115 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
             attributes["hvac_action"] = HVACAction.OFF
 
         return attributes
+
+    # -- write helpers --------------------------------------------------------
+
+    def _builder(self) -> CommandBuilder:
+        """Build a CommandBuilder seeded from current coordinator data."""
+        data = self.coordinator.data
+        regs = set(data.status.registers) if data.status else set()
+        params = data.status.params if data.status else AtreaParams()
+        return self.coordinator.client.command_builder(
+            params,
+            regs,
+            modes_to_ids=data.modes_to_ids,
+            supported_modes=data.supported_modes,
+        )
+
+    def _apply_weekly_to_temporary(self, builder: CommandBuilder) -> None:
+        """Mirror legacy intent: a manual change while on the weekly schedule
+        switches the program to TEMPORARY before power/mode is applied."""
+        status = self.coordinator.data.status if self.coordinator.data else None
+        if status is None:
+            return
+        if self.coordinator.client.program_of(status) == AtreaProgram.WEEKLY:
+            builder.set_program(AtreaProgram.TEMPORARY)
+
+    async def _commit(self, builder: CommandBuilder) -> None:
+        """Commit the builder and refresh the coordinator.
+
+        Transport failures (``AtreaConnectionError``) are surfaced to HA as
+        ``HomeAssistantError`` so the service call reports a clean failure.
+        """
+        try:
+            await self.coordinator.client.commit(builder)
+        except AtreaConnectionError as err:
+            raise HomeAssistantError(f"Atrea write failed: {err}") from err
+        await self.coordinator.async_request_refresh()
+
+    # -- write handlers -------------------------------------------------------
+
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set the fan power (percent). Below 12% is rejected (legacy)."""
+        digits = re.sub("[^0-9]", "", fan_mode)
+        if not digits:
+            return
+        pct = int(digits)
+        if pct < 12 or pct > 100:
+            return
+        builder = self._builder()
+        self._apply_weekly_to_temporary(builder)
+        builder.set_power(pct)
+        await self._commit(builder)
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set HVAC mode by mapping to the legacy program/mode intent."""
+        if hvac_mode == HVACMode.OFF:
+            await self.async_turn_off()
+            return
+        builder = self._builder()
+        if hvac_mode == HVACMode.AUTO:
+            builder.set_program(AtreaProgram.WEEKLY)
+        elif hvac_mode == HVACMode.FAN_ONLY:
+            builder.set_program(AtreaProgram.MANUAL)
+            builder.set_mode(AtreaMode.VENTILATION)
+        await self._commit(builder)
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set the ventilation mode from a preset label."""
+        try:
+            mode = AtreaMode(ALL_PRESET_LIST.index(preset_mode))
+        except ValueError:
+            return
+        if mode == AtreaMode.OFF:
+            await self.async_turn_off()
+            return
+        builder = self._builder()
+        self._apply_weekly_to_temporary(builder)
+        builder.set_mode(mode)
+        await self._commit(builder)
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set the target temperature."""
+        temperature = kwargs.get(ATTR_TEMPERATURE)
+        if temperature is None:
+            return
+        builder = self._builder()
+        builder.set_temperature(temperature)
+        await self._commit(builder)
+
+    async def async_turn_on(self) -> None:
+        """Turn the unit on, preserving the current program (legacy intent)."""
+        builder = self._builder()
+        program = self._program()
+        if program == AtreaProgram.WEEKLY:
+            builder.set_program(AtreaProgram.WEEKLY)
+        elif program == AtreaProgram.TEMPORARY:
+            builder.set_program(AtreaProgram.TEMPORARY)
+        else:
+            builder.set_program(AtreaProgram.MANUAL)
+        builder.set_mode(AtreaMode.VENTILATION)
+        await self._commit(builder)
+
+    async def async_turn_off(self) -> None:
+        """Turn the unit off, preserving the current program (legacy intent)."""
+        builder = self._builder()
+        program = self._program()
+        if program == AtreaProgram.MANUAL:
+            builder.set_program(AtreaProgram.MANUAL)
+        elif program == AtreaProgram.TEMPORARY:
+            builder.set_program(AtreaProgram.TEMPORARY)
+        else:
+            builder.set_program(AtreaProgram.WEEKLY)
+        builder.set_mode(AtreaMode.OFF)
+        await self._commit(builder)

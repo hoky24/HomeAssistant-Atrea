@@ -1,6 +1,7 @@
-from unittest.mock import MagicMock
-from pyatrea import AtreaStatus, AtreaMode, AtreaProgram
+from unittest.mock import AsyncMock, MagicMock
+from pyatrea import AtreaStatus, AtreaMode, AtreaProgram, AtreaParams, CommandBuilder
 from homeassistant.components.climate import HVACMode
+from homeassistant.const import ATTR_TEMPERATURE
 from custom_components.atrea.climate import AtreaClimate
 from custom_components.atrea.models import AtreaData
 
@@ -47,3 +48,44 @@ def test_fan_modes_expanded_to_full_granularity():
     # coarse list (<80 entries) → expanded to per-1% 12..100 (89 entries)
     assert len(e.fan_modes) == 89
     assert "25%" in e.fan_modes
+
+
+def writable_coord(program=AtreaProgram.MANUAL):
+    coord = make_coordinator({"H10708": "0", "H01020": "0", "H10700": "0"},
+                             program=program)
+    builder = CommandBuilder(
+        params=AtreaParams(ids=["H10708", "H01020", "H10700", "H10701",
+                                "H10702", "H10703", "H01015", "H01016", "H01017"]),
+        known_registers={"H10708", "H01020", "H10700", "H10701", "H10702",
+                         "H10703", "H01015", "H01016", "H01017"})
+    coord.client.command_builder.return_value = builder
+    coord.client.commit = AsyncMock(return_value=True)
+    coord.async_request_refresh = AsyncMock()
+    return coord, builder
+
+
+async def test_set_fan_mode_commits_and_refreshes():
+    coord, builder = writable_coord(program=AtreaProgram.MANUAL)
+    e = entity(coord)
+    await e.async_set_fan_mode("40%")
+    assert builder.commands.get("H10708") == "00040"
+    coord.client.commit.assert_awaited_once()
+    coord.async_request_refresh.assert_awaited_once()
+
+
+async def test_set_fan_mode_on_weekly_switches_to_temporary():
+    coord, builder = writable_coord(program=AtreaProgram.WEEKLY)
+    e = entity(coord)
+    await e.async_set_fan_mode("40%")
+    # WEEKLY → TEMPORARY: H10700 set to 2
+    assert builder.commands.get("H10700") == "00002"
+
+
+async def test_set_temperature_commits():
+    coord, builder = writable_coord()
+    builder.params.ids.extend(["H10710", "H01021"])
+    builder.known_registers.update({"H10710", "H01021"})
+    e = entity(coord)
+    await e.async_set_temperature(**{ATTR_TEMPERATURE: 22})
+    assert builder.commands.get("H10710") == "00220"
+    coord.client.commit.assert_awaited_once()
