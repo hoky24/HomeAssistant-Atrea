@@ -7,7 +7,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryNotReady
 from pyatrea import Atrea
 
@@ -22,12 +22,13 @@ async def async_migrate_entry(hass, config_entry: ConfigEntry):
     if config_entry.version == 1:
         new = {**config_entry.data}
         new[CONF_PORT] = 80
-        config_entry.data = {**new}
-        config_entry.version = 2
+        # async_update_entry handles both data and version; ConfigEntry.data /
+        # .version are read-only in modern HA so they must not be assigned
+        # directly. Previously 'new' was also referenced outside this branch,
+        # raising NameError for any version != 1.
+        hass.config_entries.async_update_entry(config_entry, data=new, version=2)
+        LOGGER.info("Migration to version 2 successful")
 
-    hass.config_entries.async_update_entry(config_entry, data=new)
-
-    LOGGER.info("Migration to version %s successful", config_entry.version)
     return True
 
 
@@ -38,21 +39,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def async_update_data():
-        hass.data[DOMAIN][entry.entry_id]["status"] = await hass.async_add_executor_job(
-            atrea.getStatus, False
-        )
-        hass.data[DOMAIN][entry.entry_id]["params"] = await hass.async_add_executor_job(
-            atrea.getParams, False
-        )
-        hass.data[DOMAIN][entry.entry_id]["supportedModes"] = (
-            await hass.async_add_executor_job(atrea.getSupportedModes)
-        ).items()
-        hass.data[DOMAIN][entry.entry_id]["userLabels"] = (
-            await hass.async_add_executor_job(atrea.loadUserLabels)
-        )
-        hass.data[DOMAIN][entry.entry_id]["supportedForcedModes"] = (
-            await hass.async_add_executor_job(atrea.getSupportedForcedModes)
-        ).items()
+        # Wrap runtime polling I/O: a network blip after a successful setup
+        # (same Errno 101 race the setup path guards) must surface as
+        # UpdateFailed so the coordinator marks entities unavailable and retries
+        # cleanly, instead of leaking a raw exception (traceback spam) and
+        # leaving hass.data partially updated.
+        try:
+            data = hass.data[DOMAIN][entry.entry_id]
+            data["status"] = await hass.async_add_executor_job(atrea.getStatus, False)
+            data["params"] = await hass.async_add_executor_job(atrea.getParams, False)
+            data["supportedModes"] = (
+                await hass.async_add_executor_job(atrea.getSupportedModes)
+            ).items()
+            data["userLabels"] = await hass.async_add_executor_job(atrea.loadUserLabels)
+            data["supportedForcedModes"] = (
+                await hass.async_add_executor_job(atrea.getSupportedForcedModes)
+            ).items()
+        except (OSError, asyncio.TimeoutError, ConnectionError) as e:
+            raise UpdateFailed(f"Atrea update failed: {e}") from e
 
     atreaCoordinator = DataUpdateCoordinator(
         hass,
@@ -82,7 +86,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     if not status:
         raise ConfigEntryNotReady("Incorrect password or too many signed in users.")
     else:
-        hass.data[DOMAIN] = {}
+        # setdefault, not '= {}': a second Atrea config entry must not wipe the
+        # first entry's data on setup.
+        hass.data.setdefault(DOMAIN, {})
 
         # Same protection for the remaining one-shot setup calls — any of them
         # can hit the same network race during boot.
