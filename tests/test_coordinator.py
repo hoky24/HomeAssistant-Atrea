@@ -50,6 +50,20 @@ async def test_static_data_fetched_once(hass):
     assert client.fetch_status.await_count == 2
 
 
+async def test_partial_poll_retains_previous_registers(hass):
+    client, _ = make_client()
+    coord = AtreaDataUpdateCoordinator(hass, client)
+    client.fetch_status = AsyncMock(
+        return_value=AtreaStatus(registers={"I10215": "215", "H10700": "0"})
+    )
+    d1 = await coord._async_update_data()
+    coord.async_set_updated_data(d1)  # mimic coordinator storing data
+    # next poll is partial: I10215 missing
+    client.fetch_status = AsyncMock(return_value=AtreaStatus(registers={"H10700": "0"}))
+    d2 = await coord._async_update_data()
+    assert d2.status.registers.get("I10215") == "215"  # retained
+
+
 async def test_auth_error_maps_to_configentryauthfailed(hass):
     client, _ = make_client()
     client.fetch_status = AsyncMock(side_effect=AtreaAuthError("denied"))

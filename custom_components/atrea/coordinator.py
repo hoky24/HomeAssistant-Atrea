@@ -3,7 +3,7 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pyatrea import AtreaClient
+from pyatrea import AtreaClient, AtreaStatus
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError, AtreaResponseError
 from pyatrea.parser import supported_modes_from_status
 
@@ -34,6 +34,11 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
     async def _async_update_data(self) -> AtreaData:
         try:
             status = await self.client.fetch_status(with_params=True)
+            # Retain last-good registers: a partial poll must not zero attributes
+            # the orchestrator reads (legacy kept last-known per-attribute).
+            if self.data is not None and self.data.status is not None:
+                merged = {**self.data.status.registers, **status.registers}
+                status = AtreaStatus(registers=merged, params=status.params)
             if not self._static_loaded:
                 (
                     self._ec_writable,
