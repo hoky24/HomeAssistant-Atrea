@@ -163,6 +163,22 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _has(status: AtreaStatus, key: str) -> bool:
         return key in status.registers
 
+    @staticmethod
+    def _raw(status: AtreaStatus, key: str) -> int | None:
+        """Read a register RAW as the legacy ``manualUpdate`` did.
+
+        The legacy integration read certain registers directly from the status
+        dict (``int(status[key])``) and applied its own ``/10`` scaling,
+        bypassing ``params.coefs``/``offsets``. ``AtreaStatus.value()`` DOES
+        apply coef/offset, so for these registers we must NOT use it (the real
+        unit has ``coef=10`` on the temp/power registers, which would scale
+        twice). Guarded membership read mirrors the legacy ``"key" in status``.
+        """
+        raw = status.registers.get(key)
+        if raw is None:
+            return None
+        return int(raw)
+
     # -- identity / device ----------------------------------------------------
 
     @property
@@ -237,7 +253,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         if status is None:
             return 0.0
         if self._has(status, "I10211"):
-            raw = status.value("I10211")
+            raw = self._raw(status, "I10211")
             if raw is None:
                 return 0.0
             if raw > 1300:
@@ -259,7 +275,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _inside_temp(self) -> float:
         status = self._status()
         if status is not None and self._has(status, "I10215"):
-            raw = status.value("I10215")
+            raw = self._raw(status, "I10215")
             if raw is not None:
                 return raw / 10
         return 0.0
@@ -270,7 +286,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         if status is None:
             return 0.0
         if self._has(status, "I10212"):
-            raw = status.value("I10212")
+            raw = self._raw(status, "I10212")
             return raw / 10 if raw is not None else 0.0
         if self._has(status, "I00200"):
             return status.value("I00200") or 0.0
@@ -280,7 +296,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _exhaust_temp(self) -> float:
         status = self._status()
         if status is not None and self._has(status, "I10214"):
-            raw = status.value("I10214")
+            raw = self._raw(status, "I10214")
             if raw is not None:
                 return raw / 10
         return 0.0
@@ -289,7 +305,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _extract_temp(self) -> float:
         status = self._status()
         if status is not None and self._has(status, "I10213"):
-            raw = status.value("I10213")
+            raw = self._raw(status, "I10213")
             if raw is not None:
                 return raw / 10
         return 0.0
@@ -300,7 +316,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         if status is None:
             return 0.0
         if self._has(status, "H10706"):
-            raw = status.value("H10706")
+            raw = self._raw(status, "H10706")
             return raw / 10 if raw is not None else 0.0
         if self._has(status, "H01006"):
             return status.value("H01006") or 0.0
@@ -312,7 +328,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         if status is None:
             return None
         if self._has(status, "H10714"):
-            raw = status.value("H10714")
+            raw = self._raw(status, "H10714")
             return int(raw) if raw is not None else None
         if self._has(status, "H01005"):
             raw = status.value("H01005")
@@ -323,7 +339,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _current_power(self) -> int | None:
         status = self._status()
         if status is not None and self._has(status, "H10704"):
-            raw = status.value("H10704")
+            raw = self._raw(status, "H10704")
             if raw is not None:
                 return int(raw)
         return None
@@ -332,7 +348,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _heating(self) -> int:
         status = self._status()
         if status is not None and self._has(status, "C10215"):
-            raw = status.value("C10215")
+            raw = self._raw(status, "C10215")
             if raw is not None:
                 return int(raw)
         return -1
@@ -341,7 +357,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def _cooling(self) -> int:
         status = self._status()
         if status is not None and self._has(status, "C10216"):
-            raw = status.value("C10216")
+            raw = self._raw(status, "C10216")
             if raw is not None:
                 return int(raw)
         return -1
@@ -355,7 +371,7 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         for inpt in range(4):
             key = f"D1020{inpt}"
             if self._has(status, key):
-                value = status.value(key)
+                value = self._raw(status, key)
                 if value:
                     result.append(f"D{inpt + 1}")
         return result

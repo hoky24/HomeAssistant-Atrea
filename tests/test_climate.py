@@ -81,6 +81,25 @@ async def test_set_fan_mode_on_weekly_switches_to_temporary():
     assert builder.commands.get("H10700") == "00002"
 
 
+def test_temp_registers_ignore_coef_offset_like_legacy():
+    coord = make_coordinator({"I10215": "215"})
+    # real unit has coef=10 on I10215; legacy read it RAW and /10 -> 21.5
+    coord.data.status = AtreaStatus(registers={"I10215": "215"},
+                                    params=AtreaParams(coefs={"I10215": 10.0}))
+    e = entity(coord)
+    attrs = e.extra_state_attributes
+    assert attrs["inside_temp"] == 21.5   # NOT 2.15
+
+
+def test_outside_temp_negative_sentinel_uses_raw():
+    coord = make_coordinator({"I10211": "65136"})
+    coord.data.status = AtreaStatus(registers={"I10211": "65136"},
+                                    params=AtreaParams(coefs={"I10211": 10.0}))
+    e = entity(coord)
+    # raw 65136 > 1300 -> (50 - (65136-65036)/10) * -1 = (50 - 10)*-1 = -40.0
+    assert e.extra_state_attributes["outside_temp"] == -40.0
+
+
 async def test_set_temperature_commits():
     coord, builder = writable_coord()
     builder.params.ids.extend(["H10710", "H01021"])
