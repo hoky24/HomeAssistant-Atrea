@@ -13,7 +13,9 @@ def make_client():
     c = MagicMock()
     status = AtreaStatus(registers={"H10700": "0", "H10705": "2"})
     c.fetch_status = AsyncMock(return_value=status)
-    c.fetch_supported = AsyncMock(return_value=({AtreaMode.VENTILATION: True}, {}, {}, {}))
+    c.fetch_userctrl = AsyncMock(
+        return_value=({AtreaMode.VENTILATION: True}, {}, {}, {})
+    )
     c.fetch_config_dir = AsyncMock(return_value=None)
     c.fetch_user_labels = AsyncMock(return_value={})
     c.fetch_translations = AsyncMock(return_value={"params": {}, "words": {}})
@@ -42,9 +44,10 @@ async def test_static_data_fetched_once(hass):
     assert client.fetch_config_dir.await_count == 1
     assert client.fetch_translations.await_count == 1
     assert client.fetch_user_labels.await_count == 1
-    # status + supported fetched every cycle
+    # userctrl is firmware-static: fetched only on the first cycle
+    assert client.fetch_userctrl.await_count == 1
+    # status fetched every cycle (bitmask overlay recomputed per cycle)
     assert client.fetch_status.await_count == 2
-    assert client.fetch_supported.await_count == 2
 
 
 async def test_auth_error_maps_to_configentryauthfailed(hass):

@@ -5,6 +5,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pyatrea import AtreaClient
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError, AtreaResponseError
+from pyatrea.parser import supported_modes_from_status
 
 from .const import DOMAIN, LOGGER, MIN_TIME_BETWEEN_SCANS
 from .models import AtreaData
@@ -24,14 +25,22 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         self._config_dir = None
         self._translations: dict[str, dict] = {"params": {}, "words": {}}
         self._user_labels: dict[str, str] = {}
+        # Firmware-static userctrl data, fetched once and cached.
+        self._ec_writable: dict = {}
+        self._ids_to_modes: dict = {}
+        self._modes_to_ids: dict = {}
+        self._forced_modes: dict = {}
 
     async def _async_update_data(self) -> AtreaData:
         try:
             status = await self.client.fetch_status(with_params=True)
-            supported, ids_to_modes, modes_to_ids, forced = (
-                await self.client.fetch_supported(status)
-            )
             if not self._static_loaded:
+                (
+                    self._ec_writable,
+                    self._ids_to_modes,
+                    self._modes_to_ids,
+                    self._forced_modes,
+                ) = await self.client.fetch_userctrl()
                 self._config_dir = await self.client.fetch_config_dir()
                 self._translations = await self.client.fetch_translations()
                 self._user_labels = await self.client.fetch_user_labels()
@@ -41,12 +50,17 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         except (AtreaConnectionError, AtreaResponseError) as err:
             raise UpdateFailed(str(err)) from err
 
+        # Recompute only the dynamic I12004 writable bitmask each cycle; fall
+        # back to the cached static userctrl ModeEC when the bitmask is absent.
+        bitmask = supported_modes_from_status(status)
+        supported = bitmask if bitmask is not None else self._ec_writable
+
         return AtreaData(
             status=status,
             supported_modes=supported,
-            ids_to_modes=ids_to_modes,
-            modes_to_ids=modes_to_ids,
-            forced_modes=forced,
+            ids_to_modes=self._ids_to_modes,
+            modes_to_ids=self._modes_to_ids,
+            forced_modes=self._forced_modes,
             user_labels=self._user_labels,
             translations=self._translations,
             model=self.client.model_of(status, self._config_dir),

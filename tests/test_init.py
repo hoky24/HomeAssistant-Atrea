@@ -10,7 +10,7 @@ def _patched_client():
     cls = p.start()
     client = cls.return_value
     client.fetch_status = AsyncMock(return_value=AtreaStatus(registers={"H10700": "0"}))
-    client.fetch_supported = AsyncMock(return_value=({}, {}, {}, {}))
+    client.fetch_userctrl = AsyncMock(return_value=({}, {}, {}, {}))
     client.fetch_config_dir = AsyncMock(return_value=None)
     client.fetch_translations = AsyncMock(return_value={"params": {}, "words": {}})
     client.fetch_user_labels = AsyncMock(return_value={})
