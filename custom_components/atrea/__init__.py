@@ -1,3 +1,5 @@
+import asyncio
+
 from homeassistant.const import (
     CONF_IP_ADDRESS,
     CONF_PORT,
@@ -66,30 +68,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         entry.data.get(CONF_PASSWORD),
     )
 
-    status = await hass.async_add_executor_job(atrea.getStatus, False)
+    # Network resilience: if the first poll fails because the network isn't
+    # ready (e.g., supervisor cold boot before DHCP/DNS settle — observed
+    # 2026-06-08 with Errno 101 Network unreachable), raise ConfigEntryNotReady
+    # so HA's config_entries machinery retries with exponential backoff
+    # instead of leaving the entity unavailable for hours.
+    try:
+        status = await hass.async_add_executor_job(atrea.getStatus, False)
+    except (OSError, asyncio.TimeoutError, ConnectionError) as e:
+        LOGGER.warning("Atrea unreachable during setup (%s); HA will retry", e)
+        raise ConfigEntryNotReady(f"Atrea unreachable: {e}") from e
 
     if not status:
         raise ConfigEntryNotReady("Incorrect password or too many signed in users.")
     else:
         hass.data[DOMAIN] = {}
 
-        hass.data[DOMAIN][entry.entry_id] = {
-            "atrea": atrea,
-            "update_listener": entry.add_update_listener(update_listener),
-            "coordinator": atreaCoordinator,
-            "supportedModes": (
-                await hass.async_add_executor_job(atrea.getSupportedModes)
-            ).items(),
-            "userLabels": (await hass.async_add_executor_job(atrea.loadUserLabels)),
-            "supportedForcedModes": (
-                await hass.async_add_executor_job(atrea.getSupportedForcedModes)
-            ).items(),
-            "status": status,
-            "model": (await hass.async_add_executor_job(atrea.getModel)),
-            "params": (await hass.async_add_executor_job(atrea.getParams, False)),
-            "translations": (await hass.async_add_executor_job(atrea.getTranslations)),
-            "configDir": (await hass.async_add_executor_job(atrea.getConfigDir)),
-        }
+        # Same protection for the remaining one-shot setup calls — any of them
+        # can hit the same network race during boot.
+        try:
+            hass.data[DOMAIN][entry.entry_id] = {
+                "atrea": atrea,
+                "update_listener": entry.add_update_listener(update_listener),
+                "coordinator": atreaCoordinator,
+                "supportedModes": (
+                    await hass.async_add_executor_job(atrea.getSupportedModes)
+                ).items(),
+                "userLabels": (await hass.async_add_executor_job(atrea.loadUserLabels)),
+                "supportedForcedModes": (
+                    await hass.async_add_executor_job(atrea.getSupportedForcedModes)
+                ).items(),
+                "status": status,
+                "model": (await hass.async_add_executor_job(atrea.getModel)),
+                "params": (await hass.async_add_executor_job(atrea.getParams, False)),
+                "translations": (await hass.async_add_executor_job(atrea.getTranslations)),
+                "configDir": (await hass.async_add_executor_job(atrea.getConfigDir)),
+            }
+        except (OSError, asyncio.TimeoutError, ConnectionError) as e:
+            LOGGER.warning("Atrea unreachable during mid-setup (%s); HA will retry", e)
+            raise ConfigEntryNotReady(f"Atrea mid-setup error: {e}") from e
+
         entry.async_on_unload(hass.data[DOMAIN][entry.entry_id]["update_listener"])
 
         await hass.async_create_task(
