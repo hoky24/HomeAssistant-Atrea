@@ -1,281 +1,174 @@
-from homeassistant import config_entries
-from homeassistant.const import CONF_IP_ADDRESS, CONF_PORT, CONF_PASSWORD, CONF_NAME
-from homeassistant.core import callback
-from .utils import isAtreaUnit, processFanModes
+"""Config flow for the Atrea integration."""
+
+from __future__ import annotations
+
+from typing import Any
+
 import voluptuous as vol
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.const import (
+    CONF_IP_ADDRESS,
+    CONF_NAME,
+    CONF_PASSWORD,
+    CONF_PORT,
+)
+from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pyatrea import AtreaClient
+from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError
+
 from .const import (
+    ALL_PRESET_LIST,
     CONF_FAN_MODES,
+    CONF_PRESETS,
+    DEFAULT_FAN_MODE_LIST,
     DOMAIN,
     LOGGER,
-    CONF_PRESETS,
-    ALL_PRESET_LIST,
-    DEFAULT_FAN_MODE_LIST,
 )
 
 
-@config_entries.HANDLERS.register(DOMAIN)
-class FlowHandler(config_entries.ConfigFlow):
+class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Atrea."""
+
     VERSION = 2
 
     @staticmethod
-    def async_get_options_flow(config_entry):
-        """Get the options flow for this handler."""
-        return AtreaOptionsFlowHandler(config_entry)
-
-    async def async_step_user(self, user_input=None):
-        """Handle a flow initialized by the user."""
-        LOGGER.debug("[ADD DEVICE] Setup process for tapo initiated by user.")
-        return await self.async_step_ip()
-
-    async def async_step_dhcp(self, dhcp_discovery):
-        return await self.async_step_auth()
-
     @callback
-    def _async_host_already_configured(self, host):
-        """See if we already have an entry matching the host."""
-        for entry in self._async_current_entries():
-            if entry.data.get(CONF_IP_ADDRESS) == host:
-                return True
-        return False
+    def async_get_options_flow(config_entry: ConfigEntry) -> AtreaOptionsFlow:
+        """Return the options flow for this handler."""
+        return AtreaOptionsFlow()
 
-    async def async_step_ip(self, user_input=None):
-        """Enter IP Address and verify Tapo device"""
-        errors = {}
-        host = ""
-        port = 80
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the initial single-step user form."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            LOGGER.debug("[ADD DEVICE] Verifying IP address")
+            host = user_input[CONF_IP_ADDRESS]
+            port = user_input[CONF_PORT]
+            password = user_input.get(CONF_PASSWORD, "")
+            name = user_input.get(CONF_NAME, "Atrea")
+
+            await self.async_set_unique_id(host)
+            self._abort_if_unique_id_configured()
+
+            client = AtreaClient(
+                host, port, password, async_get_clientsession(self.hass)
+            )
             try:
-                host = user_input[CONF_IP_ADDRESS]
-                port = user_input[CONF_PORT]
-
-                if self._async_host_already_configured(host + ":" + str(port)):
-                    LOGGER.debug(
-                        "[ADD DEVICE][%s:%d] IP:Port already configured.", host, port
-                    )
-                    raise Exception("already_configured")
-
-                LOGGER.debug(
-                    "[ADD DEVICE][%s:%d] Verifying IP address being atrea unit",
-                    host,
-                    port,
-                )
-                if not (
-                    await self.hass.async_add_executor_job(isAtreaUnit, host, port)
-                ):
-                    raise Exception("not_atrea_unit")
-
-                self.atreaHost = host
-                self.atreaPort = port
-                return await self.async_step_auth()
-
-            except Exception as e:
-                LOGGER.debug(e)
-                if "Failed to establish a new connection" in str(e):
-                    errors["base"] = "connection_failed"
-                elif "already_configured" in str(e):
-                    errors["base"] = "already_configured"
-                elif "not_atrea_unit" in str(e):
+                if not await client.is_atrea_unit():
                     errors["base"] = "not_atrea_unit"
                 else:
-                    errors["base"] = "unknown"
-                    LOGGER.error(e)
-
-        LOGGER.debug("[ADD DEVICE] Showing config flow for IP.")
-        return self.async_show_form(
-            step_id="ip",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_IP_ADDRESS, description={"suggested_value": host}
-                    ): str,
-                    vol.Required(CONF_PORT, description={"suggested_value": port}): int,
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_auth(self, user_input=None):
-        """Provide authentication data."""
-        errors = {}
-        name = "Atrea"
-        password = ""
-        host = self.atreaHost
-        port = self.atreaPort
-        if user_input is not None:
-            try:
-                LOGGER.debug("[ADD DEVICE][%s:%d] Verifying password.", host, port)
-                name = user_input[CONF_NAME]
-                if CONF_PASSWORD in user_input:
-                    password = user_input[CONF_PASSWORD]
-
-                self.atreaPassword = password
-
-                from pyatrea import Atrea
-
-                atrea = Atrea(self.atreaHost, self.atreaPort, self.atreaPassword)
-                status = await self.hass.async_add_executor_job(atrea.getStatus)
-                if not status:
-                    raise Exception("Invalid authentication data")
-
-                LOGGER.debug("[ADD DEVICE][%s:%d] Creating new entry.", host, port)
-                return self.async_create_entry(
-                    title=host + ":" + str(port),
-                    data={
-                        CONF_IP_ADDRESS: host,
-                        CONF_PORT: port,
-                        CONF_PASSWORD: password,
-                        CONF_NAME: name,
-                    },
-                )
-
-            except Exception as e:
-                LOGGER.debug(e)
-                if "Failed to establish a new connection" in str(e):
-                    errors["base"] = "connection_failed"
-                elif str(e) == "Invalid authentication data":
-                    errors["base"] = "invalid_auth"
-                else:
-                    errors["base"] = "unknown"
-                    LOGGER.error(e)
-
-        LOGGER.debug(
-            "[ADD DEVICE][%s] Showing config flow for password.", host,
-        )
-        return self.async_show_form(
-            step_id="auth",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_NAME, description={"suggested_value": name}): str,
-                    vol.Optional(
-                        CONF_PASSWORD, description={"suggested_value": password}
-                    ): str,
-                }
-            ),
-            errors=errors,
-        )
-
-
-class AtreaOptionsFlowHandler(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        #haze 500 - HA 2024.11+ read only atribut
-        #self.config_entry = config_entry
-        self.options = dict(config_entry.options)
-
-    async def async_step_init(self, user_input=None):
-        errors = {}
-        host = self.config_entry.data[CONF_IP_ADDRESS]
-        port = self.config_entry.data[CONF_PORT]
-
-        name = ""
-        if CONF_NAME in self.config_entry.data:
-            name = self.config_entry.data[CONF_NAME]
-
-        password = ""
-        if CONF_PASSWORD in self.config_entry.data:
-            password = self.config_entry.data[CONF_PASSWORD]
-
-        presets = []
-        if CONF_PRESETS in self.config_entry.data:
-            presets = self.config_entry.data[CONF_PRESETS]
-
-        fan_modes = DEFAULT_FAN_MODE_LIST
-        try:
-            if CONF_FAN_MODES in self.config_entry.data and processFanModes(
-                self.config_entry.data[CONF_FAN_MODES]
-            ):
-                fan_modes = self.config_entry.data[CONF_FAN_MODES]
-        except Exception as e:
-            LOGGER.debug("Incorrect fan modes: " + e)
-            # pass
-
-        LOGGER.debug(
-            "[%s] Opened Atrea options.", self.config_entry.data[CONF_IP_ADDRESS]
-        )
-        if user_input is not None:
-            LOGGER.debug("Verifying user input...")
-            try:
-                LOGGER.debug("Loading name...")
-                if CONF_NAME in user_input:
-                    name = user_input[CONF_NAME]
-
-                LOGGER.debug("Loading password...")
-                if CONF_PASSWORD in user_input:
-                    password = user_input[CONF_PASSWORD]
-                else:
-                    password = ""
-
-                LOGGER.debug("Loading fan_modes...")
-                if CONF_FAN_MODES in user_input:
-                    fan_modes = user_input[CONF_FAN_MODES]
-
-                LOGGER.debug("Verifying format of fan modes...")
-                if not processFanModes(fan_modes):
-                    raise Exception("Invalid fan mode format")
-
-                LOGGER.debug("Preparing save object: ip, password, name")
-                data = {
-                    CONF_IP_ADDRESS: host,
-                    CONF_PORT: port,
-                    CONF_PASSWORD: password,
-                    CONF_NAME: name,
-                }
-                LOGGER.debug("Preparing save object: fan_modes")
-                data[CONF_FAN_MODES] = fan_modes
-                LOGGER.debug("Preparing save object: presets")
-                data[CONF_PRESETS] = {}
-                for preset in ALL_PRESET_LIST:
-                    if preset in user_input:
-                        data[CONF_PRESETS][preset] = user_input[preset]
-
-                LOGGER.debug("Verifying password...")
-                if password != self.config_entry.data[CONF_PASSWORD]:
-                    from pyatrea import Atrea
-
-                    atrea = Atrea(host, port, password)
-                    status = await self.hass.async_add_executor_job(atrea.getStatus)
-                    if not status:
-                        raise Exception("Invalid authentication data")
-
-                LOGGER.debug("Saving entity...")
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry, data=data,
-                )
-                return self.async_create_entry(title="", data=None)
-            except Exception as e:
-                LOGGER.debug(e)
-                if "Failed to establish a new connection" in str(e):
-                    errors["base"] = "connection_failed"
-                elif str(e) == "Invalid authentication data":
-                    errors["base"] = "invalid_auth"
-                elif str(e) == "Invalid fan mode format":
-                    errors["base"] = "invalid_fan_mode"
-                else:
-                    errors["base"] = "unknown"
-                    LOGGER.error(e)
-
-        LOGGER.debug("Preparing form... password, name, fan_modes, presets header")
-        spec = {
-            vol.Optional(CONF_PASSWORD, description={"suggested_value": password}): str,
-            vol.Optional(CONF_NAME, description={"suggested_value": name}): str,
-            vol.Optional(
-                CONF_FAN_MODES, description={"suggested_value": fan_modes}
-            ): str,
-        }
-
-        LOGGER.debug("Preparing form... presets")
-        for preset in ALL_PRESET_LIST:
-            if preset in presets:
-                spec[
-                    vol.Required(
-                        preset, description={"suggested_value": presets[preset]}
-                    )
-                ] = bool
+                    await client.fetch_status()
+            except AtreaAuthError:
+                errors["base"] = "invalid_auth"
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
             else:
-                spec[vol.Required(preset, description={"suggested_value": True})] = bool
-
-        LOGGER.debug("Returning form.")
+                if not errors:
+                    return self.async_create_entry(
+                        title=host,
+                        data={
+                            CONF_IP_ADDRESS: host,
+                            CONF_PORT: port,
+                            CONF_PASSWORD: password,
+                            CONF_NAME: name,
+                        },
+                    )
 
         return self.async_show_form(
-            step_id="init", data_schema=vol.Schema(spec), errors=errors,
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_IP_ADDRESS): str,
+                    vol.Required(CONF_PORT, default=80): int,
+                    vol.Optional(CONF_PASSWORD, default=""): str,
+                    vol.Optional(CONF_NAME, default="Atrea"): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Handle re-authentication on credential failure."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Re-prompt the password and validate it."""
+        errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+        host = reauth_entry.data[CONF_IP_ADDRESS]
+        port = reauth_entry.data.get(CONF_PORT, 80)
+
+        if user_input is not None:
+            password = user_input.get(CONF_PASSWORD, "")
+            client = AtreaClient(
+                host, port, password, async_get_clientsession(self.hass)
+            )
+            try:
+                await client.fetch_status()
+            except AtreaAuthError:
+                errors["base"] = "invalid_auth"
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    reauth_entry,
+                    data={**reauth_entry.data, CONF_PASSWORD: password},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Optional(CONF_PASSWORD, default=""): str}),
+            errors=errors,
+            description_placeholders={CONF_IP_ADDRESS: host},
+        )
+
+
+class AtreaOptionsFlow(OptionsFlow):
+    """Handle Atrea options (fan modes + enabled presets)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options."""
+        data = {**self.config_entry.data, **self.config_entry.options}
+
+        if user_input is not None:
+            presets = {
+                preset: bool(user_input.get(preset, True))
+                for preset in ALL_PRESET_LIST
+            }
+            LOGGER.debug("Saving Atrea options for %s", data.get(CONF_IP_ADDRESS))
+            return self.async_create_entry(
+                title="",
+                data={
+                    CONF_FAN_MODES: user_input.get(
+                        CONF_FAN_MODES, DEFAULT_FAN_MODE_LIST
+                    ),
+                    CONF_PRESETS: presets,
+                },
+            )
+
+        fan_modes = data.get(CONF_FAN_MODES, DEFAULT_FAN_MODE_LIST)
+        presets = data.get(CONF_PRESETS, {})
+
+        spec: dict[Any, Any] = {
+            vol.Optional(CONF_FAN_MODES, default=fan_modes): str,
+        }
+        for preset in ALL_PRESET_LIST:
+            spec[vol.Required(preset, default=presets.get(preset, True))] = bool
+
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema(spec)
         )
