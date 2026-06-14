@@ -1,538 +1,485 @@
-import time
-import re
-from homeassistant.core import HomeAssistant
+"""Render-only Home Assistant climate entity for Atrea HRU units.
+
+This module derives ALL state from the data coordinator (``coordinator.data``)
+as PURE computation. It performs NO I/O: no ``requests``, no ``self.atrea``
+client calls, no ``manualUpdate``/``time.sleep``. Write handlers (set_*,
+turn_on/off) are added in a later task.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import HVACAction, HVACMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME, UnitOfTemperature
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
-from homeassistant.components.climate.const import HVACAction
-
-
-from custom_components.atrea.utils import processFanModes
-
-try:
-    from homeassistant.components.climate import ClimateEntity, PLATFORM_SCHEMA
-except ImportError:
-    from homeassistant.components.climate import (
-        ClimateDevice as ClimateEntity,
-        PLATFORM_SCHEMA,
-    )
-from homeassistant.components.climate.const import (
-    HVACMode
-)
-from homeassistant.const import (
-    CONF_NAME,
-    CONF_IP_ADDRESS,
-    UnitOfTemperature,
-    ATTR_TEMPERATURE,
-)
-from homeassistant.util import Throttle
-from homeassistant.helpers import device_registry as dr
-from typing import Callable
-from pyatrea import AtreaProgram, AtreaMode
+from pyatrea import AtreaMode, AtreaProgram, AtreaStatus
+from pyatrea.parser import translate
 
 from .const import (
-    DOMAIN,
-    LOGGER,
-    UPDATE_DELAY,
-    MIN_TIME_BETWEEN_SCANS,
-    SUPPORT_FLAGS,
-    STATE_UNKNOWN,
+    ALL_PRESET_LIST,
     CONF_FAN_MODES,
     CONF_PRESETS,
     DEFAULT_FAN_MODE_LIST,
-    ALL_PRESET_LIST,
-    ICONS,
+    DOMAIN,
     HVAC_MODES,
+    ICONS,
+    STATE_UNKNOWN,
+    SUPPORT_FLAGS,
 )
+from .coordinator import AtreaDataUpdateCoordinator
+
+
+def _process_fan_modes(fan_modes: str) -> list[str]:
+    """Port of legacy ``utils.processFanModes``.
+
+    Parse a comma separated list of integer percentages, validate the 12..100
+    range, sort, and render each as an ``"N%"`` string. On any malformed entry
+    fall back to the full per-1% granularity list (the orchestrator contract:
+    HA validates ``set_fan_mode`` against this list).
+    """
+    numeric: list[int] = []
+    for raw in fan_modes.split(","):
+        token = raw.strip().rstrip("%")
+        if not token.isnumeric() or int(token) < 12 or int(token) > 100:
+            return [f"{i}%" for i in range(12, 101)]
+        numeric.append(int(token))
+    numeric.sort()
+    return [f"{value}%" for value in numeric]
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable
-):
-    sensor_name = entry.data.get(CONF_NAME)
-    if sensor_name is None:
-        sensor_name = "atrea"
+) -> None:
+    """Set up the Atrea climate platform from a config entry."""
+    coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
+
+    name = entry.data.get(CONF_NAME) or "atrea"
+    ip = entry.data.get(CONF_IP_ADDRESS)
 
     fan_list = entry.data.get(CONF_FAN_MODES)
     if fan_list is None:
         fan_list = DEFAULT_FAN_MODE_LIST
 
-    # todo: verify this works with options
     preset_list = entry.data.get(CONF_PRESETS)
     if preset_list is None:
-        preset_list = {}
-        for preset in ALL_PRESET_LIST:
-            preset_list[preset] = True
+        preset_list = {preset: True for preset in ALL_PRESET_LIST}
 
-    hass.data[DOMAIN][entry.entry_id]["climate"] = AtreaDevice(
-        hass, entry, sensor_name, fan_list, preset_list
+    async_add_entities(
+        [AtreaClimate(coordinator, entry.entry_id, name, ip, fan_list, preset_list)]
     )
 
-    async_add_entities([hass.data[DOMAIN][entry.entry_id]["climate"]])
 
+class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity):
+    """Render-only climate entity deriving state from the coordinator."""
 
-class AtreaDevice(ClimateEntity):
     def __init__(
-        self, hass, entry, sensor_name, fan_list, preset_list,
-    ):
-        super().__init__()
-        self.data = hass.data[DOMAIN][entry.entry_id]
-        self.atrea = self.data["atrea"]
-        self._coordinator = self.data["coordinator"]
-        self._userLabels = self.data["userLabels"]
-        self.ip = entry.data.get(CONF_IP_ADDRESS)
-        self.updatePending = False
-        self._preset_list = []
-        self._warnings = []
-        self._name = sensor_name
-        self._current_fan_mode = None
-        self._alerts = []
-        self._outside_temp = 0.0
-        self._inside_temp = 0.0
-        self._supply_air_temp = 0.0
-        self._exhaust_temp = 0.0
-        self._extract_temp = 0.0
-        self._requested_temp = 0.0
-        self._requested_power = None
-        self._active_inputs = []
-        self._forced_mode = None
-        self._current_power = None
-
-        self._current_preset = None
-        self._current_hvac_mode = None
-        self._unit = "Status"
-        self.air_handling_control = None
-        self._enabled = False
-        self._cooling = -1
-        self._heating = -1
-
-        self.updatePresetList(preset_list, False)
-        self.updateFanList(fan_list, False)
-        self.manualUpdate(False)
-
-    def updatePresetList(self, preset_list, updateState=True):
-        self._preset_list = []
-        for required_preset in preset_list:
-            if preset_list[required_preset]:
-                for i, preset_supported in self.data["supportedModes"]:
-                    if preset_supported and ALL_PRESET_LIST[i] == required_preset:
-                        self._preset_list.append(ALL_PRESET_LIST[i])
-        if updateState:
-            self.async_schedule_update_ha_state(True)
-
-    def updateFanList(self, fan_list, updateState=True):
-        self._fan_list = processFanModes(fan_list)
-        if updateState:
-            self.async_schedule_update_ha_state(True)
-
-    def updateName(self, name, updateState=True):
+        self,
+        coordinator: AtreaDataUpdateCoordinator,
+        entry_id: str,
+        name: str,
+        ip: str,
+        fan_list: str,
+        preset_list: dict[str, bool],
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
         self._name = name
-        if updateState:
-            self.async_schedule_update_ha_state(True)
+        self.ip = ip
 
-    async def async_added_to_hass(self) -> None:
-        self._enabled = True
+        # Orchestrator contract: a coarse list (< 80 entries, e.g. the default
+        # 10%-step list) is too granular for the orchestrator. Expand to the
+        # full per-1% 12..100 list (89 entries). See legacy async_setup_entry.
+        modes = _process_fan_modes(fan_list)
+        if len(modes) < 80:
+            modes = [f"{i}%" for i in range(12, 101)]
+        self._attr_fan_modes = modes
 
-    async def async_will_remove_from_hass(self) -> None:
-        self._enabled = False
+        # Preset list filtered against supported modes (legacy updatePresetList).
+        supported = coordinator.data.supported_modes if coordinator.data else {}
+        self._attr_preset_modes = self._build_preset_list(preset_list, supported)
 
-    def getUniqueID(self):
+    @staticmethod
+    def _build_preset_list(
+        preset_list: dict[str, bool], supported: dict[AtreaMode, bool]
+    ) -> list[str]:
+        """Filter requested presets to those the unit reports as supported."""
+        supported_labels = {
+            ALL_PRESET_LIST[mode.value]
+            for mode, ok in supported.items()
+            if ok and mode.value < len(ALL_PRESET_LIST)
+        }
+        result: list[str] = []
+        for preset, requested in preset_list.items():
+            if requested and preset in supported_labels:
+                result.append(preset)
+        return result
+
+    # -- pure helpers ---------------------------------------------------------
+
+    def _status(self) -> AtreaStatus | None:
+        return self.coordinator.data.status if self.coordinator.data else None
+
+    def _program(self) -> AtreaProgram | None:
+        status = self._status()
+        if status is None:
+            return None
+        return self.coordinator.client.program_of(status)
+
+    def _mode(self) -> AtreaMode | None:
+        status = self._status()
+        if status is None:
+            return None
+        ids_to_modes = self.coordinator.data.ids_to_modes
+        return self.coordinator.client.mode_of(status, ids_to_modes)
+
+    def _forced_mode(self) -> AtreaMode | None:
+        status = self._status()
+        if status is None:
+            return None
+        forced = self.coordinator.data.forced_modes
+        return self.coordinator.client.forced_mode_of(status, forced)
+
+    @staticmethod
+    def _has(status: AtreaStatus, key: str) -> bool:
+        return key in status.registers
+
+    # -- identity / device ----------------------------------------------------
+
+    @property
+    def unique_id(self) -> str:
         return slugify(f"atrea_{self.ip}")
 
     @property
-    def brand(self):
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def brand(self) -> str:
         return "ATREA s.r.o."
 
     @property
-    def model(self):
-        if self._model:
-            return self._model["category"] + " " + self._model["model"]
-        return False
+    def model(self) -> str | None:
+        model = self.coordinator.data.model if self.coordinator.data else None
+        if model:
+            return f"{model.get('category', '')} {model.get('model', '')}".strip()
+        return None
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict[str, Any]:
+        data = self.coordinator.data
         return {
-            "identifiers": {(DOMAIN, self.getUniqueID())},
+            "identifiers": {(DOMAIN, self.unique_id)},
             "name": self.name,
             "manufacturer": self.brand,
             "model": self.model,
-            "sw_version": self._swVersion,
-            "hw_version": self._id,
-            "connections": {},
+            "sw_version": data.version if data else None,
+            "hw_version": data.unit_id if data else None,
+            "connections": set(),
         }
 
-    @property
-    def should_poll(self):
-        return True
+    # -- climate basics -------------------------------------------------------
 
     @property
-    def unit_of_measurement(self):
-        return self._unit
-
-    @property
-    def icon(self):
-        if len(self._alerts) > 0:
-            return "mdi:fan-alert"
-        elif self.fan_mode == "0%":
-            return "mdi:fan-off"
-        elif self._current_preset in ICONS:
-            return ICONS[self._current_preset]
-        else:
-            return "mdi:fan"
-
-    @property
-    def state(self):
-        return self._current_hvac_mode
+    def temperature_unit(self) -> str:
+        return UnitOfTemperature.CELSIUS
 
     @property
     def supported_features(self):
         return SUPPORT_FLAGS
 
     @property
-    def unique_id(self) -> str:
-        return self.getUniqueID()
+    def hvac_modes(self) -> list[HVACMode]:
+        return HVAC_MODES
 
     @property
-    def name(self):
-        return "{}".format(self._name)
+    def min_temp(self) -> float:
+        return 10
 
     @property
-    def extra_state_attributes(self):
-        attributes = {}
+    def max_temp(self) -> float:
+        return 40
 
-        attributes["outside_temp"] = self._outside_temp
-        attributes["inside_temp"] = self._inside_temp
-        attributes["supply_air_temp"] = self._supply_air_temp
-        attributes["requested_temp"] = self._requested_temp
-        attributes["exhaust_temp"] = self._exhaust_temp
-        attributes["extract_temp"]= self._extract_temp
-        attributes["requested_power"] = self._requested_power
-        attributes["warnings"] = self._warnings
-        attributes["alerts"] = self._alerts
-        attributes["program"] = self.air_handling_control
-        attributes["active_inputs"] = self._active_inputs
-        attributes["forced_mode"] = self._forced_mode.name
-        attributes["current_power"] = self._current_power
+    @property
+    def fan_modes(self) -> list[str]:
+        return self._attr_fan_modes
+
+    @property
+    def preset_modes(self) -> list[str]:
+        return self._attr_preset_modes
+
+    # -- derived state --------------------------------------------------------
+
+    @property
+    def _outside_temp(self) -> float:
+        """Outside temperature.
+
+        Ported from legacy ``manualUpdate``. NOTE: the legacy code had a
+        dead ``elif`` at lines ~314-317 testing ``H00511 == 1`` twice (the
+        second branch could never execute). The first branch is preserved and
+        the dead ``elif`` (which would have read ``I00201``) is dropped.
+        """
+        status = self._status()
+        if status is None:
+            return 0.0
+        if self._has(status, "I10211"):
+            raw = status.value("I10211")
+            if raw is None:
+                return 0.0
+            if raw > 1300:
+                # Negative-temperature encoding used by the unit.
+                return round((50 - (raw - 65036) / 10) * -1, 1)
+            return raw / 10
+        if self._has(status, "I00202"):
+            value = status.value("I00202")
+            if value == 126.0:
+                # Legacy condition was H00511 == 1; the dead `elif H00511 == 1`
+                # reading I00201 is intentionally dropped (could never run).
+                if status.value("H00511") == 1:
+                    return status.value("I00200") or 0.0
+                return 0.0
+            return value if value is not None else 0.0
+        return 0.0
+
+    @property
+    def _inside_temp(self) -> float:
+        status = self._status()
+        if status is not None and self._has(status, "I10215"):
+            raw = status.value("I10215")
+            if raw is not None:
+                return raw / 10
+        return 0.0
+
+    @property
+    def _supply_air_temp(self) -> float:
+        status = self._status()
+        if status is None:
+            return 0.0
+        if self._has(status, "I10212"):
+            raw = status.value("I10212")
+            return raw / 10 if raw is not None else 0.0
+        if self._has(status, "I00200"):
+            return status.value("I00200") or 0.0
+        return 0.0
+
+    @property
+    def _exhaust_temp(self) -> float:
+        status = self._status()
+        if status is not None and self._has(status, "I10214"):
+            raw = status.value("I10214")
+            if raw is not None:
+                return raw / 10
+        return 0.0
+
+    @property
+    def _extract_temp(self) -> float:
+        status = self._status()
+        if status is not None and self._has(status, "I10213"):
+            raw = status.value("I10213")
+            if raw is not None:
+                return raw / 10
+        return 0.0
+
+    @property
+    def _requested_temp(self) -> float:
+        status = self._status()
+        if status is None:
+            return 0.0
+        if self._has(status, "H10706"):
+            raw = status.value("H10706")
+            return raw / 10 if raw is not None else 0.0
+        if self._has(status, "H01006"):
+            return status.value("H01006") or 0.0
+        return 0.0
+
+    @property
+    def _requested_power(self) -> int | None:
+        status = self._status()
+        if status is None:
+            return None
+        if self._has(status, "H10714"):
+            raw = status.value("H10714")
+            return int(raw) if raw is not None else None
+        if self._has(status, "H01005"):
+            raw = status.value("H01005")
+            return int(raw) if raw is not None else None
+        return None
+
+    @property
+    def _current_power(self) -> int | None:
+        status = self._status()
+        if status is not None and self._has(status, "H10704"):
+            raw = status.value("H10704")
+            if raw is not None:
+                return int(raw)
+        return None
+
+    @property
+    def _heating(self) -> int:
+        status = self._status()
+        if status is not None and self._has(status, "C10215"):
+            raw = status.value("C10215")
+            if raw is not None:
+                return int(raw)
+        return -1
+
+    @property
+    def _cooling(self) -> int:
+        status = self._status()
+        if status is not None and self._has(status, "C10216"):
+            raw = status.value("C10216")
+            if raw is not None:
+                return int(raw)
+        return -1
+
+    @property
+    def _active_inputs(self) -> list[str]:
+        status = self._status()
+        result: list[str] = []
+        if status is None:
+            return result
+        for inpt in range(4):
+            key = f"D1020{inpt}"
+            if self._has(status, key):
+                value = status.value(key)
+                if value:
+                    result.append(f"D{inpt + 1}")
+        return result
+
+    @property
+    def _warnings(self) -> list[str]:
+        status = self._status()
+        if status is None:
+            return []
+        translations = self.coordinator.data.translations
+        result: list[str] = []
+        for warning in status.params.warning:
+            if status.registers.get(warning) == "1":
+                result.append(translate(translations, warning))
+        return result
+
+    @property
+    def _alerts(self) -> list[str]:
+        status = self._status()
+        if status is None:
+            return []
+        translations = self.coordinator.data.translations
+        result: list[str] = []
+        for alert in status.params.alert:
+            if status.registers.get(alert) == "1":
+                result.append(translate(translations, alert))
+        return result
+
+    @property
+    def program(self) -> str:
+        """Human-readable air handling control program."""
+        program = self._program()
+        if program == AtreaProgram.MANUAL:
+            return "Manual"
+        if program == AtreaProgram.WEEKLY:
+            return "Schedule"
+        if program == AtreaProgram.TEMPORARY:
+            return "Temporary"
+        return f"Unknown ({program})"
+
+    @property
+    def fan_mode(self) -> str | None:
+        status = self._status()
+        if status is None:
+            return None
+        if self._has(status, "H01001"):
+            raw = status.value("H01001")
+            if raw is not None:
+                return f"{int(raw)}%"
+        power = self._requested_power
+        if power is None:
+            return None
+        return f"{power}%"
+
+    @property
+    def target_temperature(self) -> float:
+        return float(self._requested_temp)
+
+    @property
+    def current_temperature(self) -> float:
+        return float(self._inside_temp)
+
+    @property
+    def hvac_mode(self) -> HVACMode | None:
+        status = self._status()
+        if status is None:
+            return None
+
+        mode = self._mode()
+        program = self._program()
+
+        result: HVACMode | None = None
+        if mode == AtreaMode.OFF:
+            result = HVACMode.OFF
+
+        if program == AtreaProgram.MANUAL:
+            result = HVACMode.OFF if status.value("H10705") == 0 else HVACMode.FAN_ONLY
+        elif program == AtreaProgram.WEEKLY:
+            result = HVACMode.AUTO
+        elif program == AtreaProgram.TEMPORARY:
+            result = HVACMode.OFF if status.value("H10705") == 0 else HVACMode.FAN_ONLY
+
+        if self.fan_mode == "0%":
+            result = HVACMode.OFF
+
+        return result
+
+    @property
+    def preset_mode(self) -> str:
+        mode = self._mode()
+        if mode is None:
+            return STATE_UNKNOWN
+        user_labels = self.coordinator.data.user_labels
+        if mode.name and mode.name in user_labels:
+            return user_labels[mode.name]
+        if mode.value < len(ALL_PRESET_LIST):
+            return ALL_PRESET_LIST[mode.value]
+        return STATE_UNKNOWN
+
+    @property
+    def icon(self) -> str:
+        if len(self._alerts) > 0:
+            return "mdi:fan-alert"
+        if self.fan_mode == "0%":
+            return "mdi:fan-off"
+        mode = self._mode()
+        if mode in ICONS:
+            return ICONS[mode]
+        return "mdi:fan"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        forced_mode = self._forced_mode()
+        attributes: dict[str, Any] = {
+            "outside_temp": self._outside_temp,
+            "inside_temp": self._inside_temp,
+            "supply_air_temp": self._supply_air_temp,
+            "requested_temp": self._requested_temp,
+            "exhaust_temp": self._exhaust_temp,
+            "extract_temp": self._extract_temp,
+            "requested_power": self._requested_power,
+            "warnings": self._warnings,
+            "alerts": self._alerts,
+            "program": self.program,
+            "active_inputs": self._active_inputs,
+            "forced_mode": forced_mode.name if forced_mode is not None else None,
+            "current_power": self._current_power,
+        }
 
         if self._heating == 1:
             attributes["hvac_action"] = HVACAction.HEATING
         elif self._cooling == 1:
             attributes["hvac_action"] = HVACAction.COOLING
-        elif self._current_hvac_mode == HVACMode.OFF:
+        elif self.hvac_mode == HVACMode.OFF:
             attributes["hvac_action"] = HVACAction.OFF
-        elif "hvac_action" in attributes:
-            del attributes["hvac_action"]
+
         return attributes
-
-    @property
-    def temperature_unit(self):
-        return UnitOfTemperature.CELSIUS
-
-    @property
-    def target_temperature(self):
-        return float(self._requested_temp)
-
-    @property
-    def hvac_modes(self):
-        return HVAC_MODES
-
-    @property
-    def hvac_mode(self):
-        return self._current_hvac_mode
-
-    @property
-    def preset_mode(self):
-        if self._current_preset.name and self._current_preset.name in self._userLabels:
-            return self._userLabels[self._current_preset.name]
-        elif self._current_preset < len(ALL_PRESET_LIST):
-            return ALL_PRESET_LIST[self._current_preset]
-        else:
-            return STATE_UNKNOWN
-
-    @property
-    def preset_modes(self):
-        return self._preset_list
-
-    @property
-    def current_temperature(self):
-        return float(self._inside_temp)
-
-    @property
-    def min_temp(self):
-        return 10
-
-    @property
-    def max_temp(self):
-        return 40
-
-    @property
-    def fan_mode(self):
-        return self._current_fan_mode
-
-    @property
-    def fan_modes(self):
-        return self._fan_list
-
-    @property
-    def program(self):
-        return self.air_handling_control
-
-    @Throttle(MIN_TIME_BETWEEN_SCANS)
-    async def async_update(self):
-        if not self.updatePending:
-            self.updatePending = True
-            await self._coordinator.async_request_refresh()
-            await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-            self.manualUpdate()
-            self.updatePending = False
-
-    def manualUpdate(self, updateState=True):
-        status = self.data["status"]
-        self._id = self.atrea.getID()
-        self._model = self.data["model"]
-        self._swVersion = self.atrea.getVersion()
-        self._warnings = []
-        self._alerts = []
-        self._active_inputs = []
-        if status != False:
-            if "I10211" in status:
-                if float(status["I10211"]) > 1300:
-                    self._outside_temp = round(
-                        ((50 - (float(status["I10211"]) - 65036) / 10) * -1), 1
-                    )
-                else:
-                    self._outside_temp = float(status["I10211"]) / 10
-            elif "I00202" in status:
-                if self.atrea.getValue("I00202") == 126.0:
-                    if self.atrea.getValue("H00511") == 1:
-                        self._outside_temp = self.atrea.getValue("I00200")
-                    elif self.atrea.getValue("H00511") == 1:
-                        self._outside_temp = self.atrea.getValue("I00201")
-                else:
-                    self._outside_temp = self.atrea.getValue("I00202")
-
-            # inside temperature is defined by T-IDA
-            if "I10215" in status:
-                self._inside_temp = float(status["I10215"]) / 10
-
-            if "I10212" in status:
-                self._supply_air_temp = float(status["I10212"]) / 10
-            elif "I00200" in status:
-                self._supply_air_temp = self.atrea.getValue("I00200")
-
-            if "I10214" in status:
-                self._exhaust_temp = float(status["I10214"]) / 10
-
-            if "I10213" in status:
-                self._extract_temp = float(status["I10213"]) / 10
-
-            if "H10706" in status:
-                self._requested_temp = float(status["H10706"]) / 10
-            elif "H01006" in status:
-                self._requested_temp = self.atrea.getValue("H01006")
-
-            if "H10714" in status:
-                self._requested_power = int(status["H10714"])
-            elif "H01005" in status:
-                self._requested_power = int(self.atrea.getValue("H01005"))
-
-            if "H01001" in status:
-                self._current_fan_mode = str(int(self.atrea.getValue("H01001"))) + "%"
-            else:
-                self._current_fan_mode = str(self._requested_power) + "%"
-
-            if "C10215" in status:
-                self._heating = int(status["C10215"])
-            else:
-                self._heating = -1
-
-            if "C10216" in status:
-                self._cooling = int(status["C10216"])
-            else:
-                self._cooling = -1
-
-            # D1..D4 inputs are reported in D10200..D10203
-            for inpt in range(4):
-                entry = f"D1020{inpt}"
-                if entry in status and int(status[entry]):
-                    self._active_inputs.append(f"D{inpt + 1}")
-
-            self._forced_mode = self.atrea.getForcedMode()
-
-            if "H10704" in status:
-                self._current_power = int(status["H10704"])
-
-            self._current_preset = self.atrea.getMode()
-            if self._current_preset == AtreaMode.OFF:
-                self._current_hvac_mode = HVACMode.OFF
-
-            program = self.atrea.getProgram()
-            if program == AtreaProgram.MANUAL:
-                self.air_handling_control = "Manual"
-                if self.atrea.getValue("H10705") == 0:
-                    self._current_hvac_mode = HVACMode.OFF
-                else:
-                    self._current_hvac_mode = HVACMode.FAN_ONLY
-            elif program == AtreaProgram.WEEKLY:
-                self.air_handling_control = "Schedule"
-                self._current_hvac_mode = HVACMode.AUTO
-            elif program == AtreaProgram.TEMPORARY:
-                self.air_handling_control = "Temporary"
-                if self.atrea.getValue("H10705") == 0:
-                    self._current_hvac_mode = HVACMode.OFF
-                else:
-                    self._current_hvac_mode = HVACMode.FAN_ONLY
-            else:
-                self.air_handling_control = "Unknown (" + str(program) + ")"
-
-            if self._current_fan_mode == "0%":
-                self._current_hvac_mode = HVACMode.OFF
-
-            # todo fix warning not translated
-            params = self.atrea.getParams()
-            for warning in params["warning"]:
-                if status[warning] == "1":
-                    self._warnings.append(self.atrea.getTranslation(warning))
-
-            for alert in params["alert"]:
-                if status[alert] == "1":
-                    self._alerts.append(self.atrea.getTranslation(alert))
-
-        else:
-            self._current_hvac_mode = None
-        if updateState:
-            self.async_schedule_update_ha_state(True)
-
-    async def async_set_fan_mode(self, fan_mode):
-        fan_percent = int(re.sub("[^0-9]", "", fan_mode))
-        if fan_percent < 12:
-            fan_percent = 12
-        if fan_percent > 100:
-            fan_percent = 100
-        if fan_percent >= 12 and fan_percent <= 100:
-            if (
-                await self.hass.async_add_executor_job(self.atrea.getProgram)
-                == AtreaProgram.WEEKLY
-            ):
-                self.atrea.setProgram(AtreaProgram.TEMPORARY)
-            self.atrea.setPower(fan_percent)
-
-            self.updatePending = True
-            await self.hass.async_add_executor_job(self.atrea.exec)
-            await self._coordinator.async_request_refresh()
-            await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-            self.updatePending = False
-            self.manualUpdate()
-        else:
-            LOGGER.warn("Power out of range (12,100)")
-
-    async def async_turn_on(self):
-        if self.air_handling_control == "Manual":
-            self.atrea.setProgram(AtreaProgram.MANUAL)
-            self._current_hvac_mode = HVACMode.FAN_ONLY
-        elif self.air_handling_control == "Schedule":
-            self.atrea.setProgram(AtreaProgram.WEEKLY)
-            self._current_hvac_mode = HVACMode.AUTO
-        elif self.air_handling_control == "Temporary":
-            self.atrea.setProgram(AtreaProgram.TEMPORARY)
-            self._current_hvac_mode = HVACMode.FAN_ONLY
-        self.atrea.setMode(AtreaMode.VENTILATION)
-
-        self.updatePending = True
-        await self.hass.async_add_executor_job(self.atrea.exec)
-        await self._coordinator.async_request_refresh()
-        await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-        self.manualUpdate()
-        self.updatePending = False
-
-    async def async_turn_off(self):
-        if self.air_handling_control == "Manual":
-            self.atrea.setProgram(AtreaProgram.MANUAL)
-        elif self.air_handling_control == "Temporary":
-            self.atrea.setProgram(AtreaProgram.TEMPORARY)
-        else:
-            self.atrea.setProgram(AtreaProgram.WEEKLY)
-
-        self._current_hvac_mode = HVACMode.OFF
-        self.atrea.setMode(AtreaMode.OFF)
-
-        self.updatePending = True
-        await self.hass.async_add_executor_job(self.atrea.exec)
-        await self._coordinator.async_request_refresh()
-        await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-        self.manualUpdate()
-        self.updatePending = False
-
-    async def async_set_hvac_mode(self, hvac_mode):
-        mode = None
-        program = None
-        if hvac_mode == HVACMode.AUTO:
-            self._current_hvac_mode = HVACMode.AUTO
-            program = AtreaProgram.WEEKLY
-        elif hvac_mode == HVACMode.FAN_ONLY:
-            mode = AtreaMode.VENTILATION
-            program = AtreaProgram.MANUAL
-            self._current_hvac_mode = HVACMode.FAN_ONLY
-        elif hvac_mode == HVACMode.OFF:
-            await self.async_turn_off()
-            self._current_hvac_mode = HVACMode.OFF
-
-        if program != None and program != await self.hass.async_add_executor_job(
-            self.atrea.getProgram
-        ):
-            self.atrea.setProgram(program)
-
-        if (
-            mode != None and self._current_preset != mode
-        ) or self.air_handling_control == "Schedule":
-            self.atrea.setMode(mode)
-
-        self.updatePending = True
-        await self.hass.async_add_executor_job(self.atrea.exec)
-        await self._coordinator.async_request_refresh()
-        await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-        self.manualUpdate()
-        self.updatePending = False
-
-    async def async_set_preset_mode(self, preset_mode):
-        mode = None
-        try:
-            mode = AtreaMode(ALL_PRESET_LIST.index(preset_mode))
-        except ValueError:
-            LOGGER.warn("Chosen preset=%s is incorrect preset.", str(preset_mode))
-            return
-
-        if mode == AtreaMode.OFF:
-            await self.async_turn_off()
-        if (
-            await self.hass.async_add_executor_job(self.atrea.getProgram)
-            == AtreaProgram.WEEKLY
-        ):
-            self.atrea.setProgram(AtreaProgram.TEMPORARY)
-        if mode != await self.hass.async_add_executor_job(self.atrea.getMode):
-            self.atrea.setMode(mode)
-
-        self.updatePending = True
-        await self.hass.async_add_executor_job(self.atrea.exec)
-        await self._coordinator.async_request_refresh()
-        await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-        self.manualUpdate()
-        self.updatePending = False
-
-    async def async_set_temperature(self, **kwargs):
-        """Set new target temperature."""
-        temperature = kwargs.get(ATTR_TEMPERATURE)
-        if temperature is None:
-            return
-        elif temperature >= 10 and temperature <= 40:
-            self.atrea.setTemperature(temperature)
-            self.updatePending = True
-            await self.hass.async_add_executor_job(self.atrea.exec)
-            await self._coordinator.async_request_refresh()
-            await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-            self.manualUpdate()
-            self.updatePending = False
-        else:
-            LOGGER.warn(
-                "Chosen temperature=%s is incorrect. It needs to be between 10 and 40.",
-                str(temperature),
-            )
