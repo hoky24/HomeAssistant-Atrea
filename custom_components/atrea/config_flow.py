@@ -9,7 +9,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlow,
+    OptionsFlowWithReload,
 )
 from homeassistant.const import (
     CONF_IP_ADDRESS,
@@ -135,8 +135,12 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class AtreaOptionsFlow(OptionsFlow):
-    """Handle Atrea options (fan modes + enabled presets)."""
+class AtreaOptionsFlow(OptionsFlowWithReload):
+    """Handle Atrea options (fan modes + enabled presets).
+
+    Subclassing ``OptionsFlowWithReload`` (HA 2024.11+) makes HA automatically
+    reload the config entry when options are saved, so changes take effect.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

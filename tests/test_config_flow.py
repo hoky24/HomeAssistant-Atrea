@@ -86,3 +86,32 @@ async def test_duplicate_host_aborts(hass):
         p.stop()
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+def test_options_flow_uses_reload_subclass():
+    """OptionsFlow must subclass OptionsFlowWithReload so saved options reload
+    the entry automatically (HA 2024.11+)."""
+    from homeassistant.config_entries import OptionsFlowWithReload
+
+    from custom_components.atrea.config_flow import AtreaOptionsFlow
+
+    assert issubclass(AtreaOptionsFlow, OptionsFlowWithReload)
+
+
+async def test_options_flow_creates_entry(hass):
+    from custom_components.atrea.const import CONF_FAN_MODES, CONF_PRESETS
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_FAN_MODES: "12,50,100"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_FAN_MODES] == "12,50,100"
+    assert CONF_PRESETS in result["data"]

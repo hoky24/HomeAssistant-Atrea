@@ -73,14 +73,18 @@ async def async_setup_entry(
     """Set up the Atrea climate platform from a config entry."""
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
 
-    name = entry.data.get(CONF_NAME) or "atrea"
-    ip = str(entry.data[CONF_IP_ADDRESS])
+    # Options override data: the options flow saves fan modes/presets into
+    # entry.options, so read config from a merged view.
+    opts = {**entry.data, **entry.options}
 
-    fan_list = entry.data.get(CONF_FAN_MODES)
+    name = opts.get(CONF_NAME) or "atrea"
+    ip = str(opts[CONF_IP_ADDRESS])
+
+    fan_list = opts.get(CONF_FAN_MODES)
     if fan_list is None:
         fan_list = DEFAULT_FAN_MODE_LIST
 
-    preset_list = entry.data.get(CONF_PRESETS)
+    preset_list = opts.get(CONF_PRESETS)
     if preset_list is None:
         preset_list = {preset: True for preset in ALL_PRESET_LIST}
 

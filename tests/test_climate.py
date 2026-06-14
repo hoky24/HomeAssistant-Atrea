@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from pyatrea import AtreaStatus, AtreaMode, AtreaProgram, AtreaParams, CommandBuilder
 from homeassistant.components.climate import HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
-from custom_components.atrea.climate import AtreaClimate
+from custom_components.atrea.climate import AtreaClimate, async_setup_entry
+from custom_components.atrea.const import CONF_FAN_MODES
 from custom_components.atrea.models import AtreaData
 
 
@@ -48,6 +50,37 @@ def test_fan_modes_expanded_to_full_granularity():
     # coarse list (<80 entries) → expanded to per-1% 12..100 (89 entries)
     assert len(e.fan_modes) == 89
     assert "25%" in e.fan_modes
+
+
+def test_climate_reads_fan_modes_from_options():
+    # options override data for fan/preset config
+    coord = make_coordinator({})
+    # simulate async_setup_entry's merge: build entity with an options-derived list
+    e = AtreaClimate(coord, "e", "Atrea", "1.2.3.4", "12,20,30,40,50", {})
+    # coarse list still expands per the 1% contract (existing behaviour) -> 89
+    assert len(e.fan_modes) == 89
+
+
+async def test_setup_entry_merges_options_over_data():
+    """async_setup_entry must read CONF_FAN_MODES from {**data, **options}.
+
+    data carries a coarse list (would expand to 89); options carries a fine
+    list (>= 80 entries, passes through unchanged at its own length). If the
+    merge consults options, the fine list wins -> 81, not 89.
+    """
+    coord = make_coordinator({})
+    fine_list = ",".join(str(i) for i in range(20, 101))  # 81 entries, >= 80
+    entry = SimpleNamespace(
+        entry_id="e",
+        runtime_data=SimpleNamespace(coordinator=coord),
+        data={"ip_address": "1.2.3.4", "name": "Atrea", CONF_FAN_MODES: "12,50,100"},
+        options={CONF_FAN_MODES: fine_list},
+    )
+    created: list[AtreaClimate] = []
+    await async_setup_entry(None, entry, lambda ents: created.extend(ents))
+    assert len(created) == 1
+    # options' fine list (81 entries) wins over data's coarse list (would be 89)
+    assert len(created[0].fan_modes) == 81
 
 
 def writable_coord(program=AtreaProgram.MANUAL):

@@ -33,8 +33,10 @@ async def async_setup_entry(
     """Set up the Atrea update platform from a config entry."""
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
 
-    name = entry.data.get(CONF_NAME) or "atrea"
-    ip = str(entry.data[CONF_IP_ADDRESS])
+    # Options override data (consistent with the climate platform).
+    opts = {**entry.data, **entry.options}
+    name = opts.get(CONF_NAME) or "atrea"
+    ip = str(opts[CONF_IP_ADDRESS])
 
     async_add_entities([AtreaUpdate(coordinator, entry.entry_id, name, ip)])
 
