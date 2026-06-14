@@ -88,6 +88,8 @@ def test_hvac_action_property_reports_heating():
     e = entity(coord)
     from homeassistant.components.climate import HVACAction
     assert e.hvac_action == HVACAction.HEATING
+    # canonical attribute is no longer a manual extra_state_attribute
+    assert "hvac_action" not in e.extra_state_attributes
 
 
 def writable_coord(program=AtreaProgram.MANUAL):
@@ -138,6 +140,16 @@ def test_outside_temp_negative_sentinel_uses_raw():
     e = entity(coord)
     # raw 65136 > 1300 -> (50 - (65136-65036)/10) * -1 = (50 - 10)*-1 = -40.0
     assert e.extra_state_attributes["outside_temp"] == -40.0
+
+
+async def test_set_hvac_mode_auto_skips_redundant_program_write():
+    from pyatrea import AtreaProgram
+    coord, builder = writable_coord(program=AtreaProgram.WEEKLY)  # already WEEKLY
+    e = entity(coord)
+    from homeassistant.components.climate import HVACMode
+    await e.async_set_hvac_mode(HVACMode.AUTO)
+    # already on WEEKLY -> no H10700 program write queued
+    assert "H10700" not in builder.commands
 
 
 async def test_set_temperature_commits():

@@ -514,10 +514,16 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
             await self.async_turn_off()
             return
         builder = self._builder()
+        # Avoid redundant program writes to the slow RD5 state machine: only
+        # write the program register when it actually differs from the current
+        # one (legacy behaviour).
+        current_program = self._program()
         if hvac_mode == HVACMode.AUTO:
-            builder.set_program(AtreaProgram.WEEKLY)
+            if current_program != AtreaProgram.WEEKLY:
+                builder.set_program(AtreaProgram.WEEKLY)
         elif hvac_mode == HVACMode.FAN_ONLY:
-            builder.set_program(AtreaProgram.MANUAL)
+            if current_program != AtreaProgram.MANUAL:
+                builder.set_program(AtreaProgram.MANUAL)
             builder.set_mode(AtreaMode.VENTILATION)
         await self._commit(builder)
 
