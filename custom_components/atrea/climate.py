@@ -55,6 +55,14 @@ async def async_setup_entry(
     fan_list = entry.data.get(CONF_FAN_MODES)
     if fan_list is None:
         fan_list = DEFAULT_FAN_MODE_LIST
+    # Force fine-grained fan_modes (12-100% per 1%) regardless of stored
+    # config. The default 10%-step list (12,20,30,...,100) is too coarse for
+    # orchestrator use case (e.g. base_floor=25% on night_sleep). HA's
+    # climate.set_fan_mode service validates against this list and returns
+    # 500 Internal Server Error for values not in it. Override to allow all
+    # percentages Atrea supports (12-100 per setPower validation in pyatrea).
+    if len(fan_list.split(",")) < 80:  # heuristic: < 80 = not full granularity
+        fan_list = ",".join(str(i) for i in range(12, 101))  # 89 values
 
     # todo: verify this works with options
     preset_list = entry.data.get(CONF_PRESETS)
@@ -409,6 +417,11 @@ class AtreaDevice(ClimateEntity):
         if fan_percent > 100:
             fan_percent = 100
         if fan_percent >= 12 and fan_percent <= 100:
+            # Force fresh status read to avoid stale cache (see pyatrea exec()
+            # cache invalidation). Without this, sequential calls within ~1-2s
+            # may see cached WEEKLY even though previous set_hvac_mode put unit
+            # into MANUAL, causing erroneous switch to TEMPORARY.
+            await self.hass.async_add_executor_job(self.atrea.getStatus, False)
             if (
                 await self.hass.async_add_executor_job(self.atrea.getProgram)
                 == AtreaProgram.WEEKLY
@@ -476,6 +489,9 @@ class AtreaDevice(ClimateEntity):
             await self.async_turn_off()
             self._current_hvac_mode = HVACMode.OFF
 
+        # Force fresh status read before getProgram() check to avoid stale
+        # cache from previous service calls.
+        await self.hass.async_add_executor_job(self.atrea.getStatus, False)
         if program != None and program != await self.hass.async_add_executor_job(
             self.atrea.getProgram
         ):
@@ -503,6 +519,10 @@ class AtreaDevice(ClimateEntity):
 
         if mode == AtreaMode.OFF:
             await self.async_turn_off()
+        # Force fresh status read before getProgram()/getMode() checks. Without
+        # this, sequential service calls operate on stale cached state and may
+        # incorrectly auto-switch to TEMPORARY when orchestrator just set MANUAL.
+        await self.hass.async_add_executor_job(self.atrea.getStatus, False)
         if (
             await self.hass.async_add_executor_job(self.atrea.getProgram)
             == AtreaProgram.WEEKLY
