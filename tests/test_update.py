@@ -75,6 +75,21 @@ async def test_async_install_commits_and_refreshes():
     coord.async_request_refresh.assert_awaited_once()
 
 
+def test_in_progress_from_register():
+    coord = make_coordinator()
+    coord.data.status.registers["I10005"] = "5"
+    e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")
+    assert e.in_progress is True
+
+
+def test_not_in_progress_when_register_low_or_absent():
+    coord = make_coordinator()
+    e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")
+    assert e.in_progress is False  # register absent
+    coord.data.status.registers["I10005"] = "3"
+    assert e.in_progress is False  # 3 is not > 3
+
+
 async def test_install_invalidates_static_cache():
     coord = make_coordinator(version="2.0.1", latest="2.0.2")
     coord.client.command_builder.return_value = MagicMock()

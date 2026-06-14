@@ -75,8 +75,17 @@ class AtreaUpdate(AtreaEntity, UpdateEntity):
             self.latest_version is not None
             and self.latest_version != self.installed_version
         ):
-            return UpdateEntityFeature.INSTALL
+            return UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
         return UpdateEntityFeature(0)
+
+    @property
+    def in_progress(self) -> bool:
+        # Legacy reported flash progress via I10005 > 3.
+        status = self.coordinator.data.status if self.coordinator.data else None
+        if status is None:
+            return False
+        raw = status.registers.get("I10005")
+        return raw is not None and int(raw) > 3
 
     # -- write path -----------------------------------------------------------
 
