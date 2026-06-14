@@ -1,4 +1,3 @@
-from pyatrea import Atrea
 from .const import (
     LOGGER,
     DOMAIN,
@@ -11,6 +10,8 @@ from homeassistant.const import CONF_NAME
 
 
 def isAtreaUnit(host, port):
+    from pyatrea import Atrea
+
     atrea = Atrea(host, port)
     return atrea.isAtreaUnit()
 

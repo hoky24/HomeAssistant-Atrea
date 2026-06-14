@@ -1,0 +1,23 @@
+from custom_components.atrea.models import AtreaData, AtreaRuntimeData
+
+
+def test_atrea_data_holds_fields():
+    d = AtreaData(status=None, supported_modes={}, ids_to_modes={},
+                  modes_to_ids={}, forced_modes={}, user_labels={},
+                  translations={"params": {}, "words": {}}, model=None,
+                  version=None, latest_version="0.0", unit_id=None)
+    assert d.supported_modes == {}
+    assert d.translations["params"] == {}
+
+
+def test_runtime_data_holds_client_and_coordinator():
+    rd = AtreaRuntimeData(client="C", coordinator="K")
+    assert rd.client == "C"
+    assert rd.coordinator == "K"
+
+
+def test_const_has_required_names():
+    from custom_components.atrea import const
+    assert const.DOMAIN == "atrea"
+    assert const.PLATFORMS == ["climate", "update"]
+    assert isinstance(const.ALL_PRESET_LIST, (list, tuple))

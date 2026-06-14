@@ -7,7 +7,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryNotReady
-from pyatrea import Atrea
 
 from .utils import update_listener
 from .const import DOMAIN, LOGGER, MIN_TIME_BETWEEN_SCANS
@@ -35,6 +34,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    from pyatrea import Atrea
+
     async def async_update_data():
         hass.data[DOMAIN][entry.entry_id]["status"] = await hass.async_add_executor_job(
             atrea.getStatus, False

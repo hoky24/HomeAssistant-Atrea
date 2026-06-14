@@ -6,7 +6,6 @@ from pyatrea import AtreaMode
 
 DOMAIN = "atrea"
 LOGGER = logging.getLogger(__name__)
-UPDATE_DELAY = 1  # update delay disabled
 MIN_TIME_BETWEEN_SCANS = timedelta(seconds=10)
 SUPPORT_FLAGS = (
     ClimateEntityFeature.TARGET_TEMPERATURE
@@ -15,8 +14,6 @@ SUPPORT_FLAGS = (
     | ClimateEntityFeature.TURN_OFF
     | ClimateEntityFeature.TURN_ON
 )
-DEFAULT_NAME = "Atrea"
-STATE_MANUAL = "manual"
 STATE_UNKNOWN = "unknown"
 CONF_FAN_MODES = "fan_modes"
 CONF_PRESETS = "presets"
@@ -67,3 +64,5 @@ ICONS = {
 }
 
 HVAC_MODES = [HVACMode.OFF, HVACMode.AUTO, HVACMode.FAN_ONLY]
+
+PLATFORMS = ["climate", "update"]
