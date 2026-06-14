@@ -17,14 +17,9 @@ from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import slugify
-from pyatrea import AtreaConnectionError, AtreaParams
 
-from .const import DOMAIN
 from .coordinator import AtreaDataUpdateCoordinator
+from .entity import AtreaEntity
 
 
 async def async_setup_entry(
@@ -41,7 +36,7 @@ async def async_setup_entry(
     async_add_entities([AtreaUpdate(coordinator, entry.entry_id, name, ip)])
 
 
-class AtreaUpdate(CoordinatorEntity[AtreaDataUpdateCoordinator], UpdateEntity):
+class AtreaUpdate(AtreaEntity, UpdateEntity):
     """Render-only update entity deriving firmware state from the coordinator."""
 
     def __init__(
@@ -51,40 +46,9 @@ class AtreaUpdate(CoordinatorEntity[AtreaDataUpdateCoordinator], UpdateEntity):
         name: str,
         ip: str,
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._name = name
-        self.ip = ip
-        self._attr_unique_id = slugify(f"atrea_{ip}_update")
+        super().__init__(coordinator, entry_id, name, ip)
+        self._attr_unique_id = f"{self._device_slug}_update"
         self._attr_name = f"{name} firmware"
-
-    # -- identity / device ----------------------------------------------------
-
-    @property
-    def brand(self) -> str:
-        return "ATREA s.r.o."
-
-    @property
-    def model(self) -> str | None:
-        model = self.coordinator.data.model if self.coordinator.data else None
-        if model:
-            return f"{model.get('category', '')} {model.get('model', '')}".strip()
-        return None
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        data = self.coordinator.data
-        # Identifiers MUST match the climate entity (slugify(f"atrea_{ip}"))
-        # so both entities are grouped under a single device.
-        return DeviceInfo(
-            identifiers={(DOMAIN, slugify(f"atrea_{self.ip}"))},
-            name=self._name,
-            manufacturer=self.brand,
-            model=self.model,
-            sw_version=data.version if data else None,
-            hw_version=data.unit_id if data else None,
-            connections=set(),
-        )
 
     # -- derived state --------------------------------------------------------
 
@@ -120,18 +84,6 @@ class AtreaUpdate(CoordinatorEntity[AtreaDataUpdateCoordinator], UpdateEntity):
         self, version: str | None, backup: bool, **kwargs: Any
     ) -> None:
         """Queue the firmware-update command and refresh the coordinator."""
-        data = self.coordinator.data
-        regs = set(data.status.registers) if data and data.status else set()
-        params = data.status.params if data and data.status else AtreaParams()
-        builder = self.coordinator.client.command_builder(
-            params,
-            regs,
-            modes_to_ids=data.modes_to_ids if data else {},
-            supported_modes=data.supported_modes if data else {},
-        )
+        builder = self._builder()
         builder.prepare_update()
-        try:
-            await self.coordinator.client.commit(builder)
-        except AtreaConnectionError as err:
-            raise HomeAssistantError(f"Atrea update failed: {err}") from err
-        await self.coordinator.async_request_refresh()
+        await self._commit(builder)

@@ -21,14 +21,8 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import slugify
 from pyatrea import (
-    AtreaConnectionError,
     AtreaMode,
-    AtreaParams,
     AtreaProgram,
     AtreaStatus,
     CommandBuilder,
@@ -40,13 +34,13 @@ from .const import (
     CONF_FAN_MODES,
     CONF_PRESETS,
     DEFAULT_FAN_MODE_LIST,
-    DOMAIN,
     HVAC_MODES,
     ICONS,
     STATE_UNKNOWN,
     SUPPORT_FLAGS,
 )
 from .coordinator import AtreaDataUpdateCoordinator
+from .entity import AtreaEntity
 
 
 def _process_fan_modes(fan_modes: str) -> list[str]:
@@ -93,7 +87,7 @@ async def async_setup_entry(
     )
 
 
-class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity):
+class AtreaClimate(AtreaEntity, ClimateEntity):
     """Render-only climate entity deriving state from the coordinator."""
 
     def __init__(
@@ -105,10 +99,9 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         fan_list: str,
         preset_list: dict[str, bool],
     ) -> None:
-        super().__init__(coordinator)
-        self._entry_id = entry_id
-        self._name = name
-        self.ip = ip
+        super().__init__(coordinator, entry_id, name, ip)
+        self._attr_unique_id = self._device_slug
+        self._attr_name = name
 
         # Orchestrator contract: a coarse list (< 80 entries, e.g. the default
         # 10%-step list) is too granular for the orchestrator. Expand to the
@@ -182,40 +175,6 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         if raw is None:
             return None
         return int(raw)
-
-    # -- identity / device ----------------------------------------------------
-
-    @property
-    def unique_id(self) -> str:
-        return slugify(f"atrea_{self.ip}")
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def brand(self) -> str:
-        return "ATREA s.r.o."
-
-    @property
-    def model(self) -> str | None:
-        model = self.coordinator.data.model if self.coordinator.data else None
-        if model:
-            return f"{model.get('category', '')} {model.get('model', '')}".strip()
-        return None
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        data = self.coordinator.data
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.unique_id)},
-            name=self.name,
-            manufacturer=self.brand,
-            model=self.model,
-            sw_version=data.version if data else None,
-            hw_version=data.unit_id if data else None,
-            connections=set(),
-        )
 
     # -- climate basics -------------------------------------------------------
 
@@ -516,18 +475,6 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
 
     # -- write helpers --------------------------------------------------------
 
-    def _builder(self) -> CommandBuilder:
-        """Build a CommandBuilder seeded from current coordinator data."""
-        data = self.coordinator.data
-        regs = set(data.status.registers) if data.status else set()
-        params = data.status.params if data.status else AtreaParams()
-        return self.coordinator.client.command_builder(
-            params,
-            regs,
-            modes_to_ids=data.modes_to_ids,
-            supported_modes=data.supported_modes,
-        )
-
     def _apply_weekly_to_temporary(self, builder: CommandBuilder) -> None:
         """Mirror legacy intent: a manual change while on the weekly schedule
         switches the program to TEMPORARY before power/mode is applied."""
@@ -536,18 +483,6 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
             return
         if self.coordinator.client.program_of(status) == AtreaProgram.WEEKLY:
             builder.set_program(AtreaProgram.TEMPORARY)
-
-    async def _commit(self, builder: CommandBuilder) -> None:
-        """Commit the builder and refresh the coordinator.
-
-        Transport failures (``AtreaConnectionError``) are surfaced to HA as
-        ``HomeAssistantError`` so the service call reports a clean failure.
-        """
-        try:
-            await self.coordinator.client.commit(builder)
-        except AtreaConnectionError as err:
-            raise HomeAssistantError(f"Atrea write failed: {err}") from err
-        await self.coordinator.async_request_refresh()
 
     # -- write handlers -------------------------------------------------------
 
