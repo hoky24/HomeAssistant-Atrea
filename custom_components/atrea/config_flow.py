@@ -185,8 +185,9 @@ class AtreaOptionsFlowHandler(config_entries.OptionsFlow):
             ):
                 fan_modes = self.config_entry.data[CONF_FAN_MODES]
         except Exception as e:
-            LOGGER.debug("Incorrect fan modes: " + e)
-            # pass
+            # '+ e' raised TypeError (str + Exception) inside the handler,
+            # masking the original error; use lazy %-formatting.
+            LOGGER.debug("Incorrect fan modes: %s", e)
 
         LOGGER.debug(
             "[%s] Opened Atrea options.", self.config_entry.data[CONF_IP_ADDRESS]
