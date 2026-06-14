@@ -1,99 +1,39 @@
-from homeassistant.const import (
-    CONF_IP_ADDRESS,
-    CONF_PORT,
-    CONF_PASSWORD,
-)
-from homeassistant.core import HomeAssistant
+from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.const import CONF_IP_ADDRESS, CONF_PASSWORD, CONF_PORT
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .utils import update_listener
-from .const import DOMAIN, LOGGER, MIN_TIME_BETWEEN_SCANS
+from pyatrea import AtreaClient
+
+from .const import PLATFORMS
+from .coordinator import AtreaDataUpdateCoordinator
+from .models import AtreaRuntimeData
+
+type AtreaConfigEntry = ConfigEntry[AtreaRuntimeData]
 
 
-async def async_migrate_entry(hass, config_entry: ConfigEntry):
-    """Migrate old entry."""
-    LOGGER.debug("Migrating from version %s", config_entry.version)
-
-    if config_entry.version == 1:
-        new = {**config_entry.data}
-        new[CONF_PORT] = 80
-        config_entry.data = {**new}
-        config_entry.version = 2
-
-    hass.config_entries.async_update_entry(config_entry, data=new)
-
-    LOGGER.info("Migration to version %s successful", config_entry.version)
+async def async_setup_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> bool:
+    session = async_get_clientsession(hass)
+    client = AtreaClient(
+        entry.data[CONF_IP_ADDRESS],
+        entry.data.get(CONF_PORT, 80),
+        entry.data.get(CONF_PASSWORD, ""),
+        session,
+    )
+    coordinator = AtreaDataUpdateCoordinator(hass, client, config_entry=entry)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = AtreaRuntimeData(client=client, coordinator=coordinator)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    await hass.config_entries.async_unload_platforms(entry, ["climate", "update"])
+async def async_unload_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> bool:
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if entry.version == 1:
+        data = {**entry.data, CONF_PORT: 80}
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
     return True
-
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    from pyatrea import Atrea
-
-    async def async_update_data():
-        hass.data[DOMAIN][entry.entry_id]["status"] = await hass.async_add_executor_job(
-            atrea.getStatus, False
-        )
-        hass.data[DOMAIN][entry.entry_id]["params"] = await hass.async_add_executor_job(
-            atrea.getParams, False
-        )
-        hass.data[DOMAIN][entry.entry_id]["supportedModes"] = (
-            await hass.async_add_executor_job(atrea.getSupportedModes)
-        ).items()
-        hass.data[DOMAIN][entry.entry_id]["userLabels"] = (
-            await hass.async_add_executor_job(atrea.loadUserLabels)
-        )
-        hass.data[DOMAIN][entry.entry_id]["supportedForcedModes"] = (
-            await hass.async_add_executor_job(atrea.getSupportedForcedModes)
-        ).items()
-
-    atreaCoordinator = DataUpdateCoordinator(
-        hass,
-        LOGGER,
-        name="Atrea resource status",
-        update_method=async_update_data,
-        update_interval=MIN_TIME_BETWEEN_SCANS,
-    )
-
-    atrea = Atrea(
-        entry.data.get(CONF_IP_ADDRESS),
-        entry.data.get(CONF_PORT),
-        entry.data.get(CONF_PASSWORD),
-    )
-
-    status = await hass.async_add_executor_job(atrea.getStatus, False)
-
-    if not status:
-        raise ConfigEntryNotReady("Incorrect password or too many signed in users.")
-    else:
-        hass.data[DOMAIN] = {}
-
-        hass.data[DOMAIN][entry.entry_id] = {
-            "atrea": atrea,
-            "update_listener": entry.add_update_listener(update_listener),
-            "coordinator": atreaCoordinator,
-            "supportedModes": (
-                await hass.async_add_executor_job(atrea.getSupportedModes)
-            ).items(),
-            "userLabels": (await hass.async_add_executor_job(atrea.loadUserLabels)),
-            "supportedForcedModes": (
-                await hass.async_add_executor_job(atrea.getSupportedForcedModes)
-            ).items(),
-            "status": status,
-            "model": (await hass.async_add_executor_job(atrea.getModel)),
-            "params": (await hass.async_add_executor_job(atrea.getParams, False)),
-            "translations": (await hass.async_add_executor_job(atrea.getTranslations)),
-            "configDir": (await hass.async_add_executor_job(atrea.getConfigDir)),
-        }
-        entry.async_on_unload(hass.data[DOMAIN][entry.entry_id]["update_listener"])
-
-        await hass.async_create_task(
-            hass.config_entries.async_forward_entry_setups(entry, ["climate", "update"])
-        )
-        return True

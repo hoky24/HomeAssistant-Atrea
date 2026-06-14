@@ -11,7 +11,6 @@ from .const import (
     ALL_PRESET_LIST,
     DEFAULT_FAN_MODE_LIST,
 )
-from pyatrea import Atrea
 
 
 @config_entries.HANDLERS.register(DOMAIN)
@@ -111,6 +110,8 @@ class FlowHandler(config_entries.ConfigFlow):
                     password = user_input[CONF_PASSWORD]
 
                 self.atreaPassword = password
+
+                from pyatrea import Atrea
 
                 atrea = Atrea(self.atreaHost, self.atreaPort, self.atreaPassword)
                 status = await self.hass.async_add_executor_job(atrea.getStatus)
@@ -229,6 +230,8 @@ class AtreaOptionsFlowHandler(config_entries.OptionsFlow):
 
                 LOGGER.debug("Verifying password...")
                 if password != self.config_entry.data[CONF_PASSWORD]:
+                    from pyatrea import Atrea
+
                     atrea = Atrea(host, port, password)
                     status = await self.hass.async_add_executor_job(atrea.getStatus)
                     if not status:

@@ -11,12 +11,13 @@ from .models import AtreaData
 
 
 class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
-    def __init__(self, hass: HomeAssistant, client: AtreaClient) -> None:
+    def __init__(self, hass: HomeAssistant, client: AtreaClient, config_entry=None) -> None:
         super().__init__(
             hass,
             LOGGER,
             name=DOMAIN,
             update_interval=MIN_TIME_BETWEEN_SCANS,
+            config_entry=config_entry,
         )
         self.client = client
         self._static_loaded = False
