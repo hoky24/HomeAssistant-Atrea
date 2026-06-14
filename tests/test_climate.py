@@ -83,6 +83,13 @@ async def test_setup_entry_merges_options_over_data():
     assert len(created[0].fan_modes) == 81
 
 
+def test_hvac_action_property_reports_heating():
+    coord = make_coordinator({"C10215": "1"})  # heating on
+    e = entity(coord)
+    from homeassistant.components.climate import HVACAction
+    assert e.hvac_action == HVACAction.HEATING
+
+
 def writable_coord(program=AtreaProgram.MANUAL):
     coord = make_coordinator({"H10708": "0", "H01020": "0", "H10700": "0"},
                              program=program)

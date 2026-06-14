@@ -446,6 +446,23 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         return "mdi:fan"
 
     @property
+    def hvac_action(self) -> HVACAction | None:
+        """Canonical current HVAC action.
+
+        HA's climate base reads the action from this PROPERTY (otherwise None).
+        The orchestrator still observes it via the attribute the base populates
+        from this property, so it is no longer set manually in
+        ``extra_state_attributes``.
+        """
+        if self._heating == 1:
+            return HVACAction.HEATING
+        if self._cooling == 1:
+            return HVACAction.COOLING
+        if self.hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
+        return None
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         forced_mode = self._forced_mode()
         attributes: dict[str, Any] = {
@@ -463,14 +480,6 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
             "forced_mode": forced_mode.name if forced_mode is not None else None,
             "current_power": self._current_power,
         }
-
-        if self._heating == 1:
-            attributes["hvac_action"] = HVACAction.HEATING
-        elif self._cooling == 1:
-            attributes["hvac_action"] = HVACAction.COOLING
-        elif self.hvac_mode == HVACMode.OFF:
-            attributes["hvac_action"] = HVACAction.OFF
-
         return attributes
 
     # -- write helpers --------------------------------------------------------
