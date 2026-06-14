@@ -31,6 +31,11 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         self._modes_to_ids: dict = {}
         self._forced_modes: dict = {}
 
+    def invalidate_static(self) -> None:
+        """Force a re-fetch of firmware-static data on the next refresh
+        (e.g. after a firmware install changed model/labels)."""
+        self._static_loaded = False
+
     async def _async_update_data(self) -> AtreaData:
         try:
             status = await self.client.fetch_status(with_params=True)

@@ -86,4 +86,7 @@ class AtreaUpdate(AtreaEntity, UpdateEntity):
         """Queue the firmware-update command and refresh the coordinator."""
         builder = self._builder()
         builder.prepare_update()
+        # A firmware install can change model/labels; drop the firmware-static
+        # cache so the post-commit refresh reloads it instead of staying stale.
+        self.coordinator.invalidate_static()
         await self._commit(builder)

@@ -75,6 +75,17 @@ async def test_async_install_commits_and_refreshes():
     coord.async_request_refresh.assert_awaited_once()
 
 
+async def test_install_invalidates_static_cache():
+    coord = make_coordinator(version="2.0.1", latest="2.0.2")
+    coord.client.command_builder.return_value = MagicMock()
+    coord.client.commit = AsyncMock(return_value=True)
+    coord.async_request_refresh = AsyncMock()
+    coord.invalidate_static = lambda: setattr(coord, "_static_called", True)
+    e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")
+    await e.async_install(version=None, backup=False)
+    assert getattr(coord, "_static_called", False) is True
+
+
 async def test_async_install_wraps_connection_error():
     from pyatrea import AtreaConnectionError
     from homeassistant.exceptions import HomeAssistantError

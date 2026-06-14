@@ -64,6 +64,18 @@ async def test_partial_poll_retains_previous_registers(hass):
     assert d2.status.registers.get("I10215") == "215"  # retained
 
 
+async def test_invalidate_static_forces_refetch(hass):
+    client, _ = make_client()
+    coord = AtreaDataUpdateCoordinator(hass, client)
+    await coord._async_update_data()
+    assert client.fetch_userctrl.await_count == 1
+    coord.invalidate_static()
+    await coord._async_update_data()
+    # static data re-fetched after invalidation
+    assert client.fetch_userctrl.await_count == 2
+    assert client.fetch_config_dir.await_count == 2
+
+
 async def test_auth_error_maps_to_configentryauthfailed(hass):
     client, _ = make_client()
     client.fetch_status = AsyncMock(side_effect=AtreaAuthError("denied"))
