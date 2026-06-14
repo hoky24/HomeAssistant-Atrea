@@ -7,9 +7,9 @@
     "@JurajNyiri"
   ],
   "requirements": [
-    "pyatrea==0.9.9"
+    "pyatrea @ git+https://github.com/hoky24/pyatrea@0.9.9.1"
   ],
-  "version": "6.1.8",
+  "version": "6.1.9.1",
   "config_flow": true,
   "homeassistant": "2022.4.0"
 }
