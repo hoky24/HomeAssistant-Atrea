@@ -1,132 +1,134 @@
-import logging
-import time
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from typing import Callable
+"""Render-only Home Assistant update entity for Atrea HRU units.
+
+Derives state from the data coordinator (``coordinator.data``) as pure
+computation. The single write path is ``async_install`` which queues the
+firmware-update command via the client's ``CommandBuilder`` and commits it.
+
+The entity shares the SAME device identifiers as the climate entity
+(``slugify(f"atrea_{ip}")``) so both appear under one device, while using a
+distinct ``unique_id`` suffixed with ``_update``.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
-from homeassistant.util import slugify, Throttle
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
-from .const import DOMAIN, MIN_TIME_BETWEEN_SCANS, UPDATE_DELAY, LOGGER
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
+from pyatrea import AtreaConnectionError, AtreaParams
+
+from .const import DOMAIN
+from .coordinator import AtreaDataUpdateCoordinator
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable
-):
-    sensor_name = entry.data.get(CONF_NAME)
-    if sensor_name is None:
-        sensor_name = "atrea"
-    hass.data[DOMAIN][entry.entry_id]["update"] = AtreaUpdate(hass, entry, sensor_name)
-    async_add_entities([hass.data[DOMAIN][entry.entry_id]["update"]])
+) -> None:
+    """Set up the Atrea update platform from a config entry."""
+    coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
+
+    name = entry.data.get(CONF_NAME) or "atrea"
+    ip = entry.data.get(CONF_IP_ADDRESS)
+
+    async_add_entities([AtreaUpdate(coordinator, entry.entry_id, name, ip)])
 
 
-class AtreaUpdate(UpdateEntity):
-    def __init__(self, hass, entry, sensor_name):
-        super().__init__()
-        self._coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-        self.updatePending = False
-        self.data = hass.data[DOMAIN][entry.entry_id]
-        self.atrea = self.data["atrea"]
-        self._in_progress = False
-        self._enabled = False
-        self.ip = entry.data.get(CONF_IP_ADDRESS)
-        self.updateName(sensor_name, False)
-        self.manualUpdate(False)
+class AtreaUpdate(CoordinatorEntity[AtreaDataUpdateCoordinator], UpdateEntity):
+    """Render-only update entity deriving firmware state from the coordinator."""
 
-    async def async_added_to_hass(self) -> None:
-        self._enabled = True
+    def __init__(
+        self,
+        coordinator: AtreaDataUpdateCoordinator,
+        entry_id: str,
+        name: str,
+        ip: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._name = name
+        self.ip = ip
+        self._attr_unique_id = slugify(f"atrea_{ip}_update")
+        self._attr_name = f"{name} firmware"
 
-    async def async_will_remove_from_hass(self) -> None:
-        self._enabled = False
+    # -- identity / device ----------------------------------------------------
 
     @property
-    def brand(self):
+    def brand(self) -> str:
         return "ATREA s.r.o."
 
     @property
-    def model(self):
-        if self._model:
-            return self._model["category"] + " " + self._model["model"]
-        return False
+    def model(self) -> str | None:
+        model = self.coordinator.data.model if self.coordinator.data else None
+        if model:
+            return f"{model.get('category', '')} {model.get('model', '')}".strip()
+        return None
 
     @property
-    def device_info(self):
+    def device_info(self) -> dict[str, Any]:
+        data = self.coordinator.data
+        # Identifiers MUST match the climate entity (slugify(f"atrea_{ip}"))
+        # so both entities are grouped under a single device.
         return {
-            "identifiers": {(DOMAIN, self.getUniqueID())},
-            "name": self.name,
+            "identifiers": {(DOMAIN, slugify(f"atrea_{self.ip}"))},
+            "name": self._name,
             "manufacturer": self.brand,
             "model": self.model,
-            "sw_version": self._swVersion,
-            "hw_version": self._id,
-            "connections": {},
+            "sw_version": data.version if data else None,
+            "hw_version": data.unit_id if data else None,
+            "connections": set(),
         }
 
-    @property
-    def should_poll(self):
-        return True
+    # -- derived state --------------------------------------------------------
 
     @property
-    def unique_id(self) -> str:
-        return self.getUniqueID()
-
-    def getUniqueID(self):
-        return slugify(f"atrea_{self.ip}")
-
-    @Throttle(MIN_TIME_BETWEEN_SCANS)
-    async def async_update(self):
-        if not self.updatePending:
-            self.updatePending = True
-            await self._coordinator.async_request_refresh()
-            await self.hass.async_add_executor_job(time.sleep, UPDATE_DELAY / 1000)
-            self.manualUpdate()
-            self.updatePending = False
-
-    def manualUpdate(self, updateState=True):
-        status = self.data["status"]
-        self._in_progress = "I10005" in status and int(status["I10005"]) > 3
-        self._id = self.atrea.getID()
-        self._model = self.data["model"]
-        self._swVersion = self.atrea.getVersion()
-        self._latestVersion = self.atrea.getLatestVersion()
-        if self._latestVersion == "0.0":
-            self._latestVersion = self._swVersion
-        if updateState:
-            self.async_schedule_update_ha_state(True)
+    def installed_version(self) -> str | None:
+        return self.coordinator.data.version if self.coordinator.data else None
 
     @property
-    def supported_features(self):
-        return UpdateEntityFeature.INSTALL
-
-    def updateName(self, name, updateState=True):
-        self._name = name
-        if updateState:
-            self.async_schedule_update_ha_state(True)
-
-    @property
-    def name(self) -> str:
-        return "{}".format(self._name)
-
-    @property
-    def in_progress(self) -> bool:
-        return self._in_progress
+    def latest_version(self) -> str | None:
+        data = self.coordinator.data
+        if data is None:
+            return None
+        latest = data.latest_version
+        # "0.0" (and None) means the unit reports no real latest; advertising it
+        # would look like a downgrade, so fall back to the installed version.
+        if latest in (None, "0.0"):
+            return data.version
+        return latest
 
     @property
-    def installed_version(self) -> str:
-        return self._swVersion
+    def supported_features(self) -> UpdateEntityFeature:
+        # Only offer INSTALL when a real, differing latest version is known.
+        if (
+            self.latest_version is not None
+            and self.latest_version != self.installed_version
+        ):
+            return UpdateEntityFeature.INSTALL
+        return UpdateEntityFeature(0)
 
-    @property
-    def latest_version(self) -> str:
-        return self._latestVersion
-
-    @property
-    def title(self) -> str:
-        return "{0}: {1}".format(self.name, self._latestVersion)
+    # -- write path -----------------------------------------------------------
 
     async def async_install(
-        self, version, backup,
-    ):
-        self._in_progress = True
-        self.atrea.prepareUpdate()
-        await self.hass.async_add_executor_job(self.atrea.exec)
-        await self._coordinator.async_request_refresh()
-        self.manualUpdate()
-
+        self, version: str | None, backup: bool, **kwargs: Any
+    ) -> None:
+        """Queue the firmware-update command and refresh the coordinator."""
+        data = self.coordinator.data
+        regs = set(data.status.registers) if data and data.status else set()
+        params = data.status.params if data and data.status else AtreaParams()
+        builder = self.coordinator.client.command_builder(
+            params,
+            regs,
+            modes_to_ids=data.modes_to_ids if data else {},
+            supported_modes=data.supported_modes if data else {},
+        )
+        builder.prepare_update()
+        try:
+            await self.coordinator.client.commit(builder)
+        except AtreaConnectionError as err:
+            raise HomeAssistantError(f"Atrea update failed: {err}") from err
+        await self.coordinator.async_request_refresh()
