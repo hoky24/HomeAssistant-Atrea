@@ -22,6 +22,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 from pyatrea import (
@@ -73,7 +74,7 @@ async def async_setup_entry(
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
 
     name = entry.data.get(CONF_NAME) or "atrea"
-    ip = entry.data.get(CONF_IP_ADDRESS)
+    ip = str(entry.data[CONF_IP_ADDRESS])
 
     fan_list = entry.data.get(CONF_FAN_MODES)
     if fan_list is None:
@@ -184,17 +185,17 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
         return None
 
     @property
-    def device_info(self) -> dict[str, Any]:
+    def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "manufacturer": self.brand,
-            "model": self.model,
-            "sw_version": data.version if data else None,
-            "hw_version": data.unit_id if data else None,
-            "connections": set(),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=self.name,
+            manufacturer=self.brand,
+            model=self.model,
+            sw_version=data.version if data else None,
+            hw_version=data.unit_id if data else None,
+            connections=set(),
+        )
 
     # -- climate basics -------------------------------------------------------
 
@@ -218,13 +219,8 @@ class AtreaClimate(CoordinatorEntity[AtreaDataUpdateCoordinator], ClimateEntity)
     def max_temp(self) -> float:
         return 40
 
-    @property
-    def fan_modes(self) -> list[str]:
-        return self._attr_fan_modes
-
-    @property
-    def preset_modes(self) -> list[str]:
-        return self._attr_preset_modes
+    # fan_modes / preset_modes are served from the base class via the
+    # _attr_fan_modes / _attr_preset_modes attributes set in __init__.
 
     # -- derived state --------------------------------------------------------
 

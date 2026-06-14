@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 from pyatrea import AtreaConnectionError, AtreaParams
@@ -33,7 +34,7 @@ async def async_setup_entry(
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
 
     name = entry.data.get(CONF_NAME) or "atrea"
-    ip = entry.data.get(CONF_IP_ADDRESS)
+    ip = str(entry.data[CONF_IP_ADDRESS])
 
     async_add_entities([AtreaUpdate(coordinator, entry.entry_id, name, ip)])
 
@@ -69,19 +70,19 @@ class AtreaUpdate(CoordinatorEntity[AtreaDataUpdateCoordinator], UpdateEntity):
         return None
 
     @property
-    def device_info(self) -> dict[str, Any]:
+    def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         # Identifiers MUST match the climate entity (slugify(f"atrea_{ip}"))
         # so both entities are grouped under a single device.
-        return {
-            "identifiers": {(DOMAIN, slugify(f"atrea_{self.ip}"))},
-            "name": self._name,
-            "manufacturer": self.brand,
-            "model": self.model,
-            "sw_version": data.version if data else None,
-            "hw_version": data.unit_id if data else None,
-            "connections": set(),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, slugify(f"atrea_{self.ip}"))},
+            name=self._name,
+            manufacturer=self.brand,
+            model=self.model,
+            sw_version=data.version if data else None,
+            hw_version=data.unit_id if data else None,
+            connections=set(),
+        )
 
     # -- derived state --------------------------------------------------------
 

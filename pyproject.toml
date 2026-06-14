@@ -1,3 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# pyatrea ships without type stubs / a py.typed marker, so mypy cannot analyze
+# it. Ignore the missing-import noise so real type errors in our own modules
+# stay visible.
+[[tool.mypy.overrides]]
+module = ["pyatrea", "pyatrea.*"]
+ignore_missing_imports = true
