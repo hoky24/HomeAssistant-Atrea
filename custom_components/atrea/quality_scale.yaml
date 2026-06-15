@@ -1,0 +1,88 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: The integration registers no custom service actions.
+  appropriate-polling: done
+  brands:
+    status: exempt
+    comment: HACS fork; brand assets live in the upstream home-assistant/brands repo.
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: No custom actions to document.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: Atrea RD5 units expose no mDNS/SSDP/DHCP discovery; setup is by IP.
+  discovery-update-info:
+    status: exempt
+    comment: No network discovery protocol to update connection info from.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: One device per config entry; no dynamically added sub-devices.
+  entity-category:
+    status: exempt
+    comment: Single device whose entities are all primary; no diagnostic/config split.
+  entity-device-class:
+    status: exempt
+    comment: The climate entity has no applicable device class.
+  entity-disabled-by-default:
+    status: exempt
+    comment: Single device, all entities are primary and enabled by default.
+  entity-translations:
+    status: exempt
+    comment: Single primary climate entity inherits the device name; the update entity is translated.
+  exception-translations: done
+  icon-translations:
+    status: exempt
+    comment: The climate icon is dynamic (alert/off/preset-driven) and computed in the icon property; icons.json provides only the static default.
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: No actionable repair conditions beyond the reauth flow.
+  stale-devices:
+    status: exempt
+    comment: One device per config entry; the device is removed with the entry.
+
+  # Platinum
+  async-dependency: done
+  inject-websession: done
+  strict-typing:
+    status: exempt
+    comment: The pyatrea dependency ships no py.typed marker or type stubs.
