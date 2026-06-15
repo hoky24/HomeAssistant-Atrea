@@ -115,3 +115,60 @@ async def test_options_flow_creates_entry(hass):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_FAN_MODES] == "12,50,100"
     assert CONF_PRESETS in result["data"]
+
+
+async def test_reconfigure_flow_updates_entry(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+    )
+    entry.add_to_hass(hass)
+    p, _ = _client_patch()
+    try:
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "1.2.3.4",
+                "port": 81,
+                "password": "y",
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["port"] == 81
+    assert entry.data["password"] == "y"
+
+
+async def test_reconfigure_flow_invalid_auth(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+    )
+    entry.add_to_hass(hass)
+    p, c = _client_patch()
+    c.fetch_status = AsyncMock(side_effect=AtreaAuthError("denied"))
+    try:
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "1.2.3.4",
+                "port": 80,
+                "password": "bad",
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"]["base"] == "invalid_auth"

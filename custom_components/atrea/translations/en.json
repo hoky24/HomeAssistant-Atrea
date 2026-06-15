@@ -35,6 +35,22 @@
         "data_description": {
           "password": "Current password for the Atrea unit. Leave blank if none is set."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Atrea unit",
+        "description": "Update the connection details for your Atrea ventilation unit.",
+        "data": {
+          "ip_address": "IP address",
+          "port": "Port",
+          "password": "Password",
+          "name": "Name"
+        },
+        "data_description": {
+          "ip_address": "The IP address or hostname of the Atrea unit.",
+          "port": "The HTTP port of the Atrea web interface (default 80).",
+          "password": "Password for the unit, if one is configured. Leave blank if none.",
+          "name": "Friendly name for this unit in Home Assistant."
+        }
       }
     },
     "error": {
@@ -45,7 +61,10 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "reauth_successful": "Re-authentication was successful"
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful",
+      "another_device": "The new IP address belongs to a different already-configured Atrea unit.",
+      "unique_id_mismatch": "The new IP address belongs to a different already-configured Atrea unit."
     }
   },
   "options": {

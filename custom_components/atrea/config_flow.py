@@ -95,6 +95,66 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure connection details (ip/port/password/name)."""
+        errors: dict[str, str] = {}
+        reconfigure_entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            host = user_input[CONF_IP_ADDRESS]
+            port = user_input[CONF_PORT]
+            password = user_input.get(CONF_PASSWORD, "")
+            name = user_input.get(CONF_NAME, "Atrea")
+
+            await self.async_set_unique_id(host)
+            self._abort_if_unique_id_mismatch()
+
+            client = AtreaClient(
+                host, port, password, async_get_clientsession(self.hass)
+            )
+            try:
+                if not await client.is_atrea_unit():
+                    errors["base"] = "not_atrea_unit"
+                else:
+                    await client.fetch_status()
+            except AtreaAuthError:
+                errors["base"] = "invalid_auth"
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
+            else:
+                if not errors:
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        data_updates={
+                            CONF_IP_ADDRESS: host,
+                            CONF_PORT: port,
+                            CONF_PASSWORD: password,
+                            CONF_NAME: name,
+                        },
+                    )
+
+        data = reconfigure_entry.data
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_IP_ADDRESS, default=data.get(CONF_IP_ADDRESS)
+                    ): str,
+                    vol.Required(CONF_PORT, default=data.get(CONF_PORT, 80)): int,
+                    vol.Optional(
+                        CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")
+                    ): str,
+                    vol.Optional(
+                        CONF_NAME, default=data.get(CONF_NAME, "Atrea")
+                    ): str,
+                }
+            ),
+            errors=errors,
+        )
+
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
