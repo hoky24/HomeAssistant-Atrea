@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "climate": {
+      "atrea": {
+        "default": "mdi:fan"
+      }
+    }
+  }
+}
