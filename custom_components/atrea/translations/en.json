@@ -5,6 +5,101 @@
       "firmware": {
         "name": "Firmware"
       }
+    },
+    "sensor": {
+      "outside_temp": {
+        "name": "Outside temperature"
+      },
+      "inside_temp": {
+        "name": "Inside temperature"
+      },
+      "supply_temp": {
+        "name": "Supply temperature"
+      },
+      "extract_temp": {
+        "name": "Extract temperature"
+      },
+      "exhaust_temp": {
+        "name": "Exhaust temperature"
+      },
+      "avg_outside_temp": {
+        "name": "Average outside temperature"
+      },
+      "efficiency": {
+        "name": "Efficiency"
+      },
+      "fan_drive_m1": {
+        "name": "Supply fan drive"
+      },
+      "fan_drive_m2": {
+        "name": "Extract fan drive"
+      },
+      "fan_hours_m1": {
+        "name": "Supply fan hours"
+      },
+      "fan_hours_m2": {
+        "name": "Extract fan hours"
+      }
+    },
+    "binary_sensor": {
+      "filter": {
+        "name": "Filter"
+      },
+      "any_warning": {
+        "name": "Warning"
+      },
+      "any_alert": {
+        "name": "Alert"
+      },
+      "heating": {
+        "name": "Heating"
+      },
+      "cooling": {
+        "name": "Cooling"
+      },
+      "defrost": {
+        "name": "Defrost"
+      }
+    },
+    "select": {
+      "program": {
+        "name": "Program",
+        "state": {
+          "Manual": "Manual",
+          "Schedule": "Schedule",
+          "Temporary": "Temporary"
+        }
+      },
+      "season": {
+        "name": "Season",
+        "state": {
+          "heating": "Heating",
+          "non_heating": "Non-heating"
+        }
+      },
+      "zone": {
+        "name": "Zone",
+        "state": {
+          "1": "Zone 1",
+          "2": "Zone 2",
+          "1+2": "Zone 1+2"
+        }
+      }
+    },
+    "number": {
+      "target_temperature": {
+        "name": "Target supply temperature"
+      }
+    },
+    "switch": {
+      "night_precooling": {
+        "name": "Night precooling"
+      }
+    },
+    "fan": {
+      "fan": {
+        "name": "Ventilation"
+      }
     }
   },
   "config": {
@@ -132,6 +227,10 @@
     "unit_unreachable": {
       "title": "Atrea unit unreachable",
       "description": "The Atrea unit {name} has been unreachable for several update cycles. Check the unit's power and network connection, or reconfigure its IP address."
+    },
+    "climate_deprecated": {
+      "title": "Atrea climate entity is deprecated",
+      "description": "The Atrea `climate` entity is deprecated and will be removed in a future release. Use the new `fan` (speed + presets), `number` (target supply temperature), and `select` (program/season/zone) entities instead."
     }
   },
   "exceptions": {

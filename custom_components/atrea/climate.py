@@ -25,6 +25,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from pyatrea import (
     AtreaMode,
@@ -42,6 +43,7 @@ from .const import (
     DOMAIN,
     HVAC_MODES,
     ICONS,
+    LOGGER,
     STATE_UNKNOWN,
     SUPPORT_FLAGS,
 )
@@ -133,6 +135,22 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         # Preset list filtered against supported modes (legacy updatePresetList).
         supported = coordinator.data.supported_modes if coordinator.data else {}
         self._attr_preset_modes = self._build_preset_list(preset_list, supported)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            "climate_deprecated",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="climate_deprecated",
+            breaks_in_ha_version="2027.1.0",
+        )
+        LOGGER.warning(
+            "The Atrea climate entity is deprecated; use the fan/number/select "
+            "entities. It will be removed in a future release."
+        )
 
     @staticmethod
     def _build_preset_list(

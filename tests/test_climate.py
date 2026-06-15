@@ -210,3 +210,14 @@ async def test_set_temperature_missing_raises():
     with pytest.raises(ServiceValidationError):
         await e.async_set_temperature()
     coord.client.commit.assert_not_awaited()
+
+
+async def test_climate_creates_deprecation_issue(hass):
+    from homeassistant.helpers import issue_registry as ir
+    from custom_components.atrea.const import DOMAIN
+    coord = make_coordinator({"H10700": "0"})
+    e = entity(coord)
+    e.hass = hass
+    e.entity_id = "climate.atrea"
+    await e.async_added_to_hass()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "climate_deprecated") is not None
