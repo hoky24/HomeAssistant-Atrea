@@ -131,7 +131,7 @@
     },
     "fan": {
       "fan": {
-        "name": "Ventilation"
+        "name": "Fan speed"
       }
     }
   },
