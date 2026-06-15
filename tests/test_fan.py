@@ -23,14 +23,15 @@ def test_percentage_from_power():
     assert e.percentage == 48
 
 
-def test_preset_modes_from_supported():
+def test_no_preset_mode_feature():
+    from homeassistant.components.fan import FanEntityFeature
+
     e = AtreaFan(coord({}), "e", "A", "1.2.3.4")
-    assert "Ventilation" in e.preset_modes and "Automatic" in e.preset_modes
-
-
-def test_preset_mode_current():
-    e = AtreaFan(coord({}, mode=AtreaMode.VENTILATION), "e", "A", "1.2.3.4")
-    assert e.preset_mode == "Ventilation"
+    assert not (e.supported_features & FanEntityFeature.PRESET_MODE)
+    assert e.supported_features & FanEntityFeature.SET_SPEED
+    assert not hasattr(e, "preset_modes") or not callable(
+        getattr(type(e), "preset_modes", None)
+    )
 
 
 async def test_set_percentage_writes_power():
@@ -41,8 +42,16 @@ async def test_set_percentage_writes_power():
     co.client.commit.assert_awaited_once()
 
 
-async def test_set_preset_writes_mode():
-    co = coord({}, mode=AtreaMode.VENTILATION)
+async def test_turn_on_default_minimum():
+    co = coord({"H10704": "0"})
     e = AtreaFan(co, "e", "A", "1.2.3.4")
-    await e.async_set_preset_mode("Automatic")
+    await e.async_turn_on()
+    assert co.client.command_builder.return_value.commands.get("H10708") == "00012"
+    co.client.commit.assert_awaited_once()
+
+
+async def test_turn_off_writes_off_mode():
+    co = coord({"H10704": "40"})
+    e = AtreaFan(co, "e", "A", "1.2.3.4")
+    await e.async_turn_off()
     co.client.commit.assert_awaited_once()

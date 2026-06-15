@@ -1,10 +1,11 @@
 """Home Assistant fan platform for Atrea HRU units (primary control).
 
 The fan entity is the PRIMARY user-facing control surface for the unit's
-ventilation: a percentage speed (power) plus a preset-mode selector derived
-from the unit's supported Atrea modes. State is derived purely from the
-coordinator; writes are staged onto a ``CommandBuilder`` and pushed through
-the shared ``AtreaEntity`` commit plumbing.
+ventilation: a percentage speed (power) only. The operating mode (regime) is
+exposed separately via the ``select`` platform (``AtreaModeSelect``). State is
+derived purely from the coordinator; writes are staged onto a
+``CommandBuilder`` and pushed through the shared ``AtreaEntity`` commit
+plumbing.
 
 Register asymmetry (proven, HW-verified): ``H10704`` is the power READBACK
 register read via ``status.value``; ``set_power`` targets the WRITE register
@@ -31,15 +32,6 @@ _MIN_PCT = 12
 _MAX_PCT = 100
 
 
-def _display_name(mode: AtreaMode) -> str:
-    """Render an ``AtreaMode`` as a human-readable preset label.
-
-    VENTILATION -> "Ventilation", AUTOMATIC -> "Automatic",
-    CIRCULATION_AND_VENTILATION -> "Circulation And Ventilation".
-    """
-    return mode.name.replace("_", " ").title()
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: AtreaConfigEntry,
@@ -56,12 +48,11 @@ async def async_setup_entry(
 
 
 class AtreaFan(AtreaEntity, FanEntity):
-    """Primary fan control: percentage speed + preset modes."""
+    """Primary fan control: percentage speed only."""
 
     _attr_translation_key = "fan"
     _attr_supported_features = (
         FanEntityFeature.SET_SPEED
-        | FanEntityFeature.PRESET_MODE
         | FanEntityFeature.TURN_ON
         | FanEntityFeature.TURN_OFF
     )
@@ -92,29 +83,6 @@ class AtreaFan(AtreaEntity, FanEntity):
         return max(0, min(100, int(value)))
 
     @property
-    def preset_modes(self) -> list[str]:
-        """Preset labels derived from the unit's supported modes."""
-        data = self.coordinator.data
-        if data is None:
-            return []
-        return [
-            _display_name(mode)
-            for mode, supported in data.supported_modes.items()
-            if supported
-        ]
-
-    @property
-    def preset_mode(self) -> str | None:
-        """Current preset label from the coordinator's resolved mode."""
-        data = self.coordinator.data
-        if data is None or data.status is None:
-            return None
-        mode = self.coordinator.client.mode_of(data.status)
-        if mode is None:
-            return None
-        return _display_name(mode)
-
-    @property
     def is_on(self) -> bool:
         return (self.percentage or 0) > 0
 
@@ -130,28 +98,20 @@ class AtreaFan(AtreaEntity, FanEntity):
         builder.set_power(pct)
         await self._commit(builder)
 
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set the ventilation mode from a preset label."""
-        mode = next(
-            (m for m in AtreaMode if _display_name(m) == preset_mode),
-            None,
-        )
-        if mode is None:
-            raise ValueError(f"Unknown preset mode: {preset_mode}")
-        builder = self._builder()
-        builder.set_mode(mode)
-        await self._commit(builder)
-
     async def async_turn_on(
         self,
         percentage: int | None = None,
         preset_mode: str | None = None,
         **kwargs: Any,
     ) -> None:
-        """Turn the unit on via preset, percentage, or a sensible default."""
-        if preset_mode is not None:
-            await self.async_set_preset_mode(preset_mode)
-        elif percentage is not None:
+        """Turn the unit on via percentage, or a sensible minimum default.
+
+        ``preset_mode`` is retained only to keep the override signature
+        compatible with ``FanEntity`` (LSP); it is never acted on because the
+        entity no longer advertises ``FanEntityFeature.PRESET_MODE`` (the
+        operating mode lives in the select platform).
+        """
+        if percentage is not None:
             await self.async_set_percentage(percentage)
         else:
             await self.async_set_percentage(_MIN_PCT)
