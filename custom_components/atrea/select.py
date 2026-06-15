@@ -16,7 +16,7 @@ from homeassistant.components.select import SelectEntity, SelectEntityDescriptio
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from pyatrea import AtreaProgram, CommandBuilder
+from pyatrea import AtreaMode, AtreaProgram, CommandBuilder
 
 from . import AtreaConfigEntry
 from .const import PROGRAM_OPTIONS, SEASON_OPTIONS, ZONE_OPTIONS
@@ -38,6 +38,15 @@ class AtreaSelectEntityDescription(SelectEntityDescription):
 def _set_program(builder: CommandBuilder, value: int) -> None:
     """Stage the program triples for ``value`` (``set_program`` returns bool)."""
     builder.set_program(AtreaProgram(value))
+
+
+def _mode_name(mode: AtreaMode) -> str:
+    """Render an ``AtreaMode`` as a human-readable display label.
+
+    VENTILATION -> "Ventilation", AUTOMATIC -> "Automatic",
+    CIRCULATION_AND_VENTILATION -> "Circulation And Ventilation".
+    """
+    return mode.name.replace("_", " ").title()
 
 
 SELECTS: tuple[AtreaSelectEntityDescription, ...] = (
@@ -75,12 +84,12 @@ async def async_setup_entry(
     name = opts.get(CONF_NAME) or "atrea"
     ip = str(opts[CONF_IP_ADDRESS])
 
-    async_add_entities(
-        [
-            AtreaSelect(coordinator, entry.entry_id, name, ip, description)
-            for description in SELECTS
-        ]
-    )
+    entities: list[SelectEntity] = [
+        AtreaSelect(coordinator, entry.entry_id, name, ip, description)
+        for description in SELECTS
+    ]
+    entities.append(AtreaModeSelect(coordinator, entry.entry_id, name, ip))
+    async_add_entities(entities)
 
 
 class AtreaSelect(AtreaEntity, SelectEntity):
@@ -120,4 +129,57 @@ class AtreaSelect(AtreaEntity, SelectEntity):
         value = self.entity_description.options_map[option]
         builder = self._builder()
         self.entity_description.write_fn(builder, value)
+        await self._commit(builder)
+
+
+class AtreaModeSelect(AtreaEntity, SelectEntity):
+    """Operating-mode (regime) selector with dynamic options.
+
+    Unlike ``AtreaSelect`` (fixed register/label map), the options here are
+    derived dynamically from the unit's ``supported_modes`` and the current
+    option from the coordinator's resolved ``mode_of`` status.
+    """
+
+    _attr_translation_key = "operating_mode"
+
+    def __init__(
+        self,
+        coordinator: AtreaDataUpdateCoordinator,
+        entry_id: str,
+        name: str,
+        ip: str,
+    ) -> None:
+        super().__init__(coordinator, entry_id, name, ip)
+        self._attr_unique_id = f"{self._device_slug}_operating_mode"
+
+    @property
+    def options(self) -> list[str]:
+        data = self.coordinator.data
+        if data is None:
+            return []
+        supported = [
+            mode for mode, ok in data.supported_modes.items() if ok
+        ]
+        supported.sort(key=lambda m: m.value)
+        return [_mode_name(mode) for mode in supported]
+
+    @property
+    def current_option(self) -> str | None:
+        data = self.coordinator.data
+        if data is None or data.status is None:
+            return None
+        mode = self.coordinator.client.mode_of(data.status)
+        if mode is None:
+            return None
+        return _mode_name(mode)
+
+    async def async_select_option(self, option: str) -> None:
+        mode = next(
+            (m for m in AtreaMode if _mode_name(m) == option),
+            None,
+        )
+        if mode is None:
+            raise ValueError(f"Unknown operating mode: {option}")
+        builder = self._builder()
+        builder.set_mode(mode)
         await self._commit(builder)

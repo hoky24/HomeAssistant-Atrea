@@ -1,16 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock
 
-from pyatrea import AtreaStatus, CommandBuilder
+from pyatrea import AtreaMode, AtreaStatus, CommandBuilder
 
 from custom_components.atrea.models import AtreaData
-from custom_components.atrea.select import SELECTS, AtreaSelect
+from custom_components.atrea.select import SELECTS, AtreaModeSelect, AtreaSelect
 
 
-def coord(regs):
+def coord(regs, supported_modes=None, mode=None):
     c = MagicMock()
     c.data = AtreaData(
         status=AtreaStatus(registers=regs),
-        supported_modes={},
+        supported_modes=supported_modes or {},
         ids_to_modes={},
         modes_to_ids={},
         forced_modes={},
@@ -23,6 +23,7 @@ def coord(regs):
     )
     c.client.command_builder.return_value = CommandBuilder()
     c.client.commit = AsyncMock()
+    c.client.mode_of.return_value = mode
     c.async_request_refresh = AsyncMock()
     return c
 
@@ -61,3 +62,32 @@ def test_season_current():
 
 def test_count():
     assert len(SELECTS) == 3
+
+
+def _mode_coord():
+    return coord(
+        {},
+        supported_modes={AtreaMode.VENTILATION: True, AtreaMode.AUTOMATIC: True},
+        mode=AtreaMode.VENTILATION,
+    )
+
+
+def test_mode_select_current_and_options():
+    e = AtreaModeSelect(_mode_coord(), "e", "A", "1.2.3.4")
+    assert e.current_option == "Ventilation"
+    assert "Ventilation" in e.options
+    assert "Automatic" in e.options
+    assert e.unique_id == "atrea_1_2_3_4_operating_mode"
+
+
+def test_mode_select_options_sorted_by_value():
+    e = AtreaModeSelect(_mode_coord(), "e", "A", "1.2.3.4")
+    # AtreaMode.AUTOMATIC (value 1) precedes VENTILATION (value 2)
+    assert e.options == ["Automatic", "Ventilation"]
+
+
+async def test_mode_select_writes_mode():
+    co = _mode_coord()
+    e = AtreaModeSelect(co, "e", "A", "1.2.3.4")
+    await e.async_select_option("Automatic")
+    co.client.commit.assert_awaited_once()
