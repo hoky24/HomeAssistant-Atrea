@@ -69,4 +69,10 @@ ICONS = {
 
 HVAC_MODES = [HVACMode.OFF, HVACMode.AUTO, HVACMode.FAN_ONLY]
 
-PLATFORMS = ["climate", "update"]
+PLATFORMS = [
+    "climate", "update", "fan", "sensor", "binary_sensor",
+    "select", "number", "switch",
+]
+PROGRAM_OPTIONS = {"Manual": 0, "Schedule": 1, "Temporary": 2}   # H10700 value
+SEASON_OPTIONS = {"heating": 0, "non_heating": 1}                # H11401 value
+ZONE_OPTIONS = {"1": 0, "2": 1, "1+2": 2}                        # H10707 value

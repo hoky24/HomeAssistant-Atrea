@@ -20,5 +20,15 @@ def test_runtime_data_holds_client_and_coordinator():
 def test_const_has_required_names():
     from custom_components.atrea import const
     assert const.DOMAIN == "atrea"
-    assert const.PLATFORMS == ["climate", "update"]
+    assert set(const.PLATFORMS) == {
+        "climate", "update", "fan", "sensor", "binary_sensor",
+        "select", "number", "switch",
+    }
     assert isinstance(const.ALL_PRESET_LIST, (list, tuple))
+
+
+def test_program_season_zone_option_maps():
+    from custom_components.atrea import const
+    assert const.PROGRAM_OPTIONS == {"Manual": 0, "Schedule": 1, "Temporary": 2}
+    assert const.SEASON_OPTIONS == {"heating": 0, "non_heating": 1}
+    assert const.ZONE_OPTIONS == {"1": 0, "2": 1, "1+2": 2}
