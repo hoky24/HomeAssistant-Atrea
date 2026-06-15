@@ -74,5 +74,10 @@ PLATFORMS = [
     "select", "number", "switch",
 ]
 PROGRAM_OPTIONS = {"Manual": 0, "Schedule": 1, "Temporary": 2}   # H10700 value
-SEASON_OPTIONS = {"heating": 0, "non_heating": 1}                # H11401 value
+SEASON_OPTIONS = {                                               # H11401 value (SeasonType)
+    "heating": 0,
+    "non_heating": 1,
+    "auto_oda": 2,        # T-ODA: automatic by outdoor temperature
+    "auto_oda_plus": 3,   # T-ODA+
+}
 ZONE_OPTIONS = {"1": 0, "2": 1, "1+2": 2}                        # H10707 value

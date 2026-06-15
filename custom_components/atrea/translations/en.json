@@ -74,7 +74,9 @@
         "name": "Season",
         "state": {
           "heating": "Heating",
-          "non_heating": "Non-heating"
+          "non_heating": "Non-heating",
+          "auto_oda": "Auto (outdoor temp)",
+          "auto_oda_plus": "Auto (outdoor temp +)"
         }
       },
       "zone": {

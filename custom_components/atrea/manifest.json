@@ -16,5 +16,5 @@
   "requirements": [
     "pyatrea @ git+https://github.com/hoky24/pyatrea@0.11.0-rc.2"
   ],
-  "version": "6.4.0-rc.1"
+  "version": "6.4.0-rc.2"
 }

@@ -30,5 +30,7 @@ def test_const_has_required_names():
 def test_program_season_zone_option_maps():
     from custom_components.atrea import const
     assert const.PROGRAM_OPTIONS == {"Manual": 0, "Schedule": 1, "Temporary": 2}
-    assert const.SEASON_OPTIONS == {"heating": 0, "non_heating": 1}
+    assert const.SEASON_OPTIONS == {
+        "heating": 0, "non_heating": 1, "auto_oda": 2, "auto_oda_plus": 3,
+    }
     assert const.ZONE_OPTIONS == {"1": 0, "2": 1, "1+2": 2}
