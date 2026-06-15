@@ -91,3 +91,17 @@ async def test_mode_select_writes_mode():
     e = AtreaModeSelect(co, "e", "A", "1.2.3.4")
     await e.async_select_option("Automatic")
     co.client.commit.assert_awaited_once()
+
+
+def test_mode_current_option_none_when_transient():
+    # Unit is in a transient regime (DEFROSTING=11) that is NOT in
+    # supported_modes, so its label is not a selectable option. The select
+    # must report None rather than a label HA would reject as "Invalid option".
+    co = coord(
+        {},
+        supported_modes={AtreaMode.VENTILATION: True, AtreaMode.AUTOMATIC: True},
+        mode=AtreaMode.DEFROSTING,
+    )
+    e = AtreaModeSelect(co, "e", "A", "1.2.3.4")
+    assert e.current_option is None
+    assert "Defrosting" not in e.options

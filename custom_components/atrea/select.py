@@ -21,6 +21,7 @@ from pyatrea import AtreaMode, AtreaProgram, CommandBuilder
 from . import AtreaConfigEntry
 from .const import PROGRAM_OPTIONS, SEASON_OPTIONS, ZONE_OPTIONS
 from .coordinator import AtreaDataUpdateCoordinator
+from .derive import mode_display_name
 from .entity import AtreaEntity
 
 PARALLEL_UPDATES = 1
@@ -38,15 +39,6 @@ class AtreaSelectEntityDescription(SelectEntityDescription):
 def _set_program(builder: CommandBuilder, value: int) -> None:
     """Stage the program triples for ``value`` (``set_program`` returns bool)."""
     builder.set_program(AtreaProgram(value))
-
-
-def _mode_name(mode: AtreaMode) -> str:
-    """Render an ``AtreaMode`` as a human-readable display label.
-
-    VENTILATION -> "Ventilation", AUTOMATIC -> "Automatic",
-    CIRCULATION_AND_VENTILATION -> "Circulation And Ventilation".
-    """
-    return mode.name.replace("_", " ").title()
 
 
 SELECTS: tuple[AtreaSelectEntityDescription, ...] = (
@@ -161,7 +153,7 @@ class AtreaModeSelect(AtreaEntity, SelectEntity):
             mode for mode, ok in data.supported_modes.items() if ok
         ]
         supported.sort(key=lambda m: m.value)
-        return [_mode_name(mode) for mode in supported]
+        return [mode_display_name(mode) for mode in supported]
 
     @property
     def current_option(self) -> str | None:
@@ -171,11 +163,15 @@ class AtreaModeSelect(AtreaEntity, SelectEntity):
         mode = self.coordinator.client.mode_of(data.status)
         if mode is None:
             return None
-        return _mode_name(mode)
+        # Transient/automatic regimes (STARTUP, DEFROSTING, IN1, ...) are not in
+        # supported_modes, so their label is not a selectable option. Reporting
+        # it would make HA log "Invalid option" and blank the dropdown.
+        name = mode_display_name(mode)
+        return name if name in self.options else None
 
     async def async_select_option(self, option: str) -> None:
         mode = next(
-            (m for m in AtreaMode if _mode_name(m) == option),
+            (m for m in AtreaMode if mode_display_name(m) == option),
             None,
         )
         if mode is None:

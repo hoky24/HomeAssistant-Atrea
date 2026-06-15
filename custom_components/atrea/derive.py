@@ -1,9 +1,21 @@
 from __future__ import annotations
 
-from pyatrea import AtreaStatus
+from pyatrea import AtreaMode, AtreaStatus
 from pyatrea.parser import translate
 
 _TEMP_SENTINEL = 126.0  # raw 1260 (/10) = sensor not wired
+
+
+def mode_display_name(mode: AtreaMode) -> str:
+    """Render an ``AtreaMode`` as a human-readable display label.
+
+    VENTILATION -> "Ventilation", AUTOMATIC -> "Automatic",
+    CIRCULATION_AND_VENTILATION -> "Circulation And Ventilation".
+
+    The translation ``state`` keys depend on this exact output, so it must
+    stay stable for every ``AtreaMode`` member.
+    """
+    return mode.name.replace("_", " ").title()
 
 
 def temp(status: AtreaStatus | None, key: str) -> float | None:
