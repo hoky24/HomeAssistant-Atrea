@@ -37,6 +37,12 @@ def test_has_entity_name_and_primary_name_none():
     assert e._attr_name is None
 
 
+def test_climate_hidden_by_default():
+    e = entity(make_coordinator({}))
+    # deprecated entity: hidden from the dashboard for new registrations
+    assert e.entity_registry_visible_default is False
+
+
 def test_translation_key_binds_icons_without_breaking_name():
     e = entity(make_coordinator({}))
     # translation_key binds icons.json (entity.climate.atrea.default) as the

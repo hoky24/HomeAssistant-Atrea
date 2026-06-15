@@ -109,6 +109,10 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
     # ``_attr_name = None``, the name stays the device name, not a translated
     # entity name.
     _attr_translation_key = "atrea"
+    # Deprecated entity: hide from the dashboard by default for NEW
+    # registrations. Already-registered entities must be hidden by the user;
+    # no code can retroactively hide an existing entity.
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,
