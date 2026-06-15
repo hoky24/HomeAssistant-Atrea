@@ -23,6 +23,8 @@ from .coordinator import AtreaDataUpdateCoordinator
 class AtreaEntity(CoordinatorEntity[AtreaDataUpdateCoordinator]):
     """Common identity/device/write plumbing for Atrea entities."""
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: AtreaDataUpdateCoordinator,

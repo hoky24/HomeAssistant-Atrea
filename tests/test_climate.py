@@ -26,6 +26,14 @@ def entity(coord, fan_list="12,100"):
     return AtreaClimate(coord, "e", "Atrea", "1.2.3.4", fan_list, {})
 
 
+def test_has_entity_name_and_primary_name_none():
+    e = entity(make_coordinator({}))
+    # modern naming idiom: device carries the user name, the primary climate
+    # entity inherits it (name None), and has_entity_name is True
+    assert e._attr_has_entity_name is True
+    assert e._attr_name is None
+
+
 def test_hvac_mode_auto_when_weekly():
     e = entity(make_coordinator({"H10700": "1"}, program=AtreaProgram.WEEKLY))
     assert e.hvac_mode == HVACMode.AUTO

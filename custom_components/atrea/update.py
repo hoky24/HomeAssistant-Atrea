@@ -56,7 +56,7 @@ class AtreaUpdate(AtreaEntity, UpdateEntity):
     ) -> None:
         super().__init__(coordinator, entry_id, name, ip)
         self._attr_unique_id = f"{self._device_slug}_update"
-        self._attr_name = f"{name} firmware"
+        self._attr_translation_key = "firmware"
 
     # -- derived state --------------------------------------------------------
 

@@ -32,6 +32,15 @@ def test_latest_falls_back_to_installed_when_unknown():
     assert e.latest_version == "2.0.1"
 
 
+def test_has_entity_name_and_translation_key():
+    coord = make_coordinator()
+    e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")
+    # modern naming idiom: name derived from device + translation_key, not a
+    # hand-built f"{name} firmware" string
+    assert e._attr_has_entity_name is True
+    assert e._attr_translation_key == "firmware"
+
+
 def test_device_class_is_firmware():
     from homeassistant.components.update import UpdateDeviceClass
 

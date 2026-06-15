@@ -103,7 +103,8 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
     ) -> None:
         super().__init__(coordinator, entry_id, name, ip)
         self._attr_unique_id = self._device_slug
-        self._attr_name = name
+        # Primary entity: inherit the device name (has_entity_name idiom).
+        self._attr_name = None
 
         # Orchestrator contract: a coarse list (< 80 entries, e.g. the default
         # 10%-step list) is too granular for the orchestrator. Expand to the

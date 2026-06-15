@@ -1,5 +1,12 @@
 {
   "title": "Atrea",
+  "entity": {
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
+    }
+  },
   "config": {
     "flow_title": "Atrea: {name}",
     "step": {
