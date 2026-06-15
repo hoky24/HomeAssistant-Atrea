@@ -86,6 +86,31 @@
           "2": "Zone 2",
           "1+2": "Zone 1+2"
         }
+      },
+      "operating_mode": {
+        "name": "Operating mode",
+        "state": {
+          "Off": "Off",
+          "Automatic": "Automatic",
+          "Ventilation": "Ventilation",
+          "Circulation And Ventilation": "Circulation and ventilation",
+          "Circulation": "Circulation",
+          "Night Precooling": "Night precooling",
+          "Disbalance": "Disbalance",
+          "Overpressure": "Overpressure",
+          "Periodic Ventilation": "Periodic ventilation",
+          "Startup": "Startup",
+          "Rundown": "Rundown",
+          "Defrosting": "Defrosting",
+          "External": "External",
+          "Hp Defrosting": "HP defrosting",
+          "In1": "Input 1",
+          "In2": "Input 2",
+          "D1": "D1",
+          "D2": "D2",
+          "D3": "D3",
+          "D4": "D4"
+        }
       }
     },
     "number": {
@@ -95,7 +120,7 @@
     },
     "switch": {
       "night_precooling": {
-        "name": "Night precooling"
+        "name": "Auto night precooling"
       }
     },
     "fan": {
