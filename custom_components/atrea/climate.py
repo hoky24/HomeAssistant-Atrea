@@ -42,6 +42,8 @@ from .const import (
 from .coordinator import AtreaDataUpdateCoordinator
 from .entity import AtreaEntity
 
+PARALLEL_UPDATES = 1
+
 
 def _process_fan_modes(fan_modes: str) -> list[str]:
     """Port of legacy ``utils.processFanModes``.
