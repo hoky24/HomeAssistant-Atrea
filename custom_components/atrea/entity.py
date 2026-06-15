@@ -11,7 +11,7 @@ duplicated ``__init__`` field storage, the ``slugify`` device slug, the
 from __future__ import annotations
 
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 from pyatrea import AtreaConnectionError, AtreaParams, CommandBuilder

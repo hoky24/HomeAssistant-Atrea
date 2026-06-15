@@ -9,11 +9,14 @@ turn_on/off) are added in a later task.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import HVACAction, HVACMode
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.climate.const import (
+    ClimateEntityFeature,
+    HVACAction,
+    HVACMode,
+)
 from homeassistant.const import (
     ATTR_TEMPERATURE,
     CONF_IP_ADDRESS,
@@ -22,6 +25,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from pyatrea import (
     AtreaMode,
     AtreaProgram,
@@ -41,6 +45,7 @@ from .const import (
     STATE_UNKNOWN,
     SUPPORT_FLAGS,
 )
+from . import AtreaConfigEntry
 from .coordinator import AtreaDataUpdateCoordinator
 from .entity import AtreaEntity
 
@@ -66,7 +71,9 @@ def _process_fan_modes(fan_modes: str) -> list[str]:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable
+    hass: HomeAssistant,
+    entry: AtreaConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Atrea climate platform from a config entry."""
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
@@ -188,7 +195,7 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         return UnitOfTemperature.CELSIUS
 
     @property
-    def supported_features(self):
+    def supported_features(self) -> ClimateEntityFeature:
         return SUPPORT_FLAGS
 
     @property
@@ -299,8 +306,8 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
             raw = self._raw(status, "H10714")
             return int(raw) if raw is not None else None
         if self._has(status, "H01005"):
-            raw = status.value("H01005")
-            return int(raw) if raw is not None else None
+            value = status.value("H01005")
+            return int(value) if value is not None else None
         return None
 
     @property

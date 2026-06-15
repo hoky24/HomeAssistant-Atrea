@@ -19,7 +19,7 @@ class AtreaData:
     modes_to_ids: dict[AtreaMode, int]
     forced_modes: dict[int, AtreaMode]
     user_labels: dict[str, str]
-    translations: dict[str, dict]
+    translations: dict[str, dict[str, object]]
     model: dict[str, str] | None
     version: str | None
     latest_version: str

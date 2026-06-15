@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from xml.etree import ElementTree as ET
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pyatrea import AtreaClient, AtreaStatus
+from pyatrea import AtreaClient, AtreaMode, AtreaStatus
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError, AtreaResponseError
 from pyatrea.parser import supported_modes_from_status
 
@@ -28,14 +30,17 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         )
         self.client = client
         self._static_loaded = False
-        self._config_dir = None
-        self._translations: dict[str, dict] = {"params": {}, "words": {}}
+        self._config_dir: ET.Element | None = None
+        self._translations: dict[str, dict[str, object]] = {
+            "params": {},
+            "words": {},
+        }
         self._user_labels: dict[str, str] = {}
         # Firmware-static userctrl data, fetched once and cached.
-        self._ec_writable: dict = {}
-        self._ids_to_modes: dict = {}
-        self._modes_to_ids: dict = {}
-        self._forced_modes: dict = {}
+        self._ec_writable: dict[AtreaMode, bool] = {}
+        self._ids_to_modes: dict[int, AtreaMode] = {}
+        self._modes_to_ids: dict[AtreaMode, int] = {}
+        self._forced_modes: dict[int, AtreaMode] = {}
 
     def invalidate_static(self) -> None:
         """Force a re-fetch of firmware-static data on the next refresh

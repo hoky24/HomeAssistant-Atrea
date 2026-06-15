@@ -11,17 +11,18 @@ distinct ``unique_id`` suffixed with ``_update``.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
     UpdateEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import AtreaConfigEntry
 from .coordinator import AtreaDataUpdateCoordinator
 from .entity import AtreaEntity
 
@@ -29,7 +30,9 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: Callable
+    hass: HomeAssistant,
+    entry: AtreaConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Atrea update platform from a config entry."""
     coordinator: AtreaDataUpdateCoordinator = entry.runtime_data.coordinator
