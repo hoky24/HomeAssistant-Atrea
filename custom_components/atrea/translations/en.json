@@ -39,6 +39,12 @@
       },
       "fan_hours_m2": {
         "name": "Extract fan hours"
+      },
+      "active_warnings": {
+        "name": "Active warnings"
+      },
+      "active_alerts": {
+        "name": "Active alerts"
       }
     },
     "binary_sensor": {

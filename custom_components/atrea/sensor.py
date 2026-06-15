@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -27,6 +28,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from pyatrea import AtreaStatus
+from pyatrea.registers import by_role
 
 from . import AtreaConfigEntry
 from . import derive
@@ -34,6 +36,14 @@ from .coordinator import AtreaDataUpdateCoordinator
 from .entity import AtreaEntity
 
 PARALLEL_UPDATES = 0
+
+# Maximum length of a Home Assistant state string.
+_STATE_MAX_LEN = 255
+
+_ACTIVE_FLAG_IDS: dict[str, list[str]] = {
+    "warning": by_role("warning"),
+    "alert": by_role("alert"),
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -139,6 +149,14 @@ async def async_setup_entry(
             AtreaSensor(coordinator, entry.entry_id, name, ip, description)
             for description in SENSORS
         ]
+        + [
+            AtreaActiveFlagsSensor(
+                coordinator, entry.entry_id, name, ip, "warning", "active_warnings"
+            ),
+            AtreaActiveFlagsSensor(
+                coordinator, entry.entry_id, name, ip, "alert", "active_alerts"
+            ),
+        ]
     )
 
 
@@ -164,3 +182,49 @@ class AtreaSensor(AtreaEntity, SensorEntity):
     def native_value(self) -> float | int | None:
         status = self.coordinator.data.status if self.coordinator.data else None
         return self.entity_description.value_fn(status)
+
+
+class AtreaActiveFlagsSensor(AtreaEntity, SensorEntity):
+    """Free-text sensor whose state lists the active warning/alert labels.
+
+    The active labels are derived from ``derive.active_flags`` using the same
+    ``registers.by_role`` id source and ``translations`` dict that the
+    ``any_warning``/``any_alert`` binary sensors use. When no flag is active the
+    state is ``"OK"``; when no status is available yet the state is ``None``.
+    The full list is also exposed via the ``active`` state attribute, mirroring
+    the binary sensors.
+    """
+
+    def __init__(
+        self,
+        coordinator: AtreaDataUpdateCoordinator,
+        entry_id: str,
+        name: str,
+        ip: str,
+        role: str,
+        translation_key: str,
+    ) -> None:
+        super().__init__(coordinator, entry_id, name, ip)
+        self._ids = _ACTIVE_FLAG_IDS[role]
+        self._attr_translation_key = translation_key
+        self._attr_unique_id = f"{self._device_slug}_{translation_key}"
+
+    def _active(self) -> list[str] | None:
+        data = self.coordinator.data
+        if data is None or data.status is None:
+            return None
+        return derive.active_flags(data.status, self._ids, data.translations)
+
+    @property
+    def native_value(self) -> str | None:
+        active = self._active()
+        if active is None:
+            return None
+        return (", ".join(active) or "OK")[:_STATE_MAX_LEN]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        active = self._active()
+        if active is None:
+            return None
+        return {"active": active}
