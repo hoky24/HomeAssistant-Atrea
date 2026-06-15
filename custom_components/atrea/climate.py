@@ -21,6 +21,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from pyatrea import (
     AtreaMode,
     AtreaProgram,
@@ -34,6 +35,7 @@ from .const import (
     CONF_FAN_MODES,
     CONF_PRESETS,
     DEFAULT_FAN_MODE_LIST,
+    DOMAIN,
     HVAC_MODES,
     ICONS,
     STATE_UNKNOWN,
@@ -502,10 +504,18 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         """Set the fan power (percent). Below 12% is rejected (legacy)."""
         digits = re.sub("[^0-9]", "", fan_mode)
         if not digits:
-            return
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_fan_mode",
+                translation_placeholders={"value": fan_mode},
+            )
         pct = int(digits)
         if pct < 12 or pct > 100:
-            return
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_fan_mode",
+                translation_placeholders={"value": fan_mode},
+            )
         builder = self._builder()
         self._apply_weekly_to_temporary(builder)
         builder.set_power(pct)
@@ -534,8 +544,12 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         """Set the ventilation mode from a preset label."""
         try:
             mode = AtreaMode(ALL_PRESET_LIST.index(preset_mode))
-        except ValueError:
-            return
+        except ValueError as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_preset",
+                translation_placeholders={"preset": preset_mode},
+            ) from err
         if mode == AtreaMode.OFF:
             await self.async_turn_off()
             return
@@ -548,7 +562,10 @@ class AtreaClimate(AtreaEntity, ClimateEntity):
         """Set the target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
-            return
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="missing_temperature",
+            )
         builder = self._builder()
         builder.set_temperature(temperature)
         await self._commit(builder)

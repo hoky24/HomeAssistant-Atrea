@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from pyatrea import AtreaStatus, AtreaMode, AtreaProgram, AtreaParams, CommandBuilder
 from homeassistant.components.climate import HVACMode
 from homeassistant.const import ATTR_TEMPERATURE
+from homeassistant.exceptions import ServiceValidationError
 from custom_components.atrea.climate import AtreaClimate, async_setup_entry
 from custom_components.atrea.const import CONF_FAN_MODES
 from custom_components.atrea.models import AtreaData
@@ -168,3 +171,35 @@ async def test_set_temperature_commits():
     await e.async_set_temperature(**{ATTR_TEMPERATURE: 22})
     assert builder.commands.get("H10710") == "00220"
     coord.client.commit.assert_awaited_once()
+
+
+async def test_set_fan_mode_invalid_raises():
+    coord, builder = writable_coord()
+    e = entity(coord)
+    with pytest.raises(ServiceValidationError):
+        await e.async_set_fan_mode("5%")
+    coord.client.commit.assert_not_awaited()
+
+
+async def test_set_fan_mode_non_numeric_raises():
+    coord, builder = writable_coord()
+    e = entity(coord)
+    with pytest.raises(ServiceValidationError):
+        await e.async_set_fan_mode("fast")
+    coord.client.commit.assert_not_awaited()
+
+
+async def test_set_preset_mode_unknown_raises():
+    coord, builder = writable_coord()
+    e = entity(coord)
+    with pytest.raises(ServiceValidationError):
+        await e.async_set_preset_mode("NotARealPreset")
+    coord.client.commit.assert_not_awaited()
+
+
+async def test_set_temperature_missing_raises():
+    coord, builder = writable_coord()
+    e = entity(coord)
+    with pytest.raises(ServiceValidationError):
+        await e.async_set_temperature()
+    coord.client.commit.assert_not_awaited()

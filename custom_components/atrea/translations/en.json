@@ -81,5 +81,16 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "invalid_fan_mode": {
+      "message": "Fan percentage {value} is out of range (12-100)."
+    },
+    "invalid_preset": {
+      "message": "Preset {preset} is not supported by the unit."
+    },
+    "missing_temperature": {
+      "message": "No temperature provided."
+    }
   }
 }
