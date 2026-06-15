@@ -1,9 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 from xml.etree import ElementTree as ET
 
 from pyatrea import AtreaMode, AtreaStatus
+
+if TYPE_CHECKING:
+    from pyatrea import AtreaClient
+
+    from .coordinator import AtreaDataUpdateCoordinator
 
 
 @dataclass(slots=True)
@@ -24,5 +29,5 @@ class AtreaData:
 
 @dataclass(slots=True)
 class AtreaRuntimeData:
-    client: Any
-    coordinator: Any
+    client: "AtreaClient"
+    coordinator: "AtreaDataUpdateCoordinator"

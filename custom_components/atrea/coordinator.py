@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -12,7 +13,12 @@ from .models import AtreaData
 
 
 class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
-    def __init__(self, hass: HomeAssistant, client: AtreaClient, config_entry=None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: AtreaClient,
+        config_entry: ConfigEntry | None = None,
+    ) -> None:
         super().__init__(
             hass,
             LOGGER,
