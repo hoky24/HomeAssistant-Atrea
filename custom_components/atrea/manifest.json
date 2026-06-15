@@ -12,7 +12,7 @@
   "loggers": [
     "pyatrea"
   ],
-  "quality_scale": "silver",
+  "quality_scale": "platinum",
   "requirements": [
     "pyatrea @ git+https://github.com/hoky24/pyatrea@0.10.0-rc.2"
   ],

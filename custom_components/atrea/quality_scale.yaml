@@ -6,7 +6,8 @@ rules:
   appropriate-polling: done
   brands:
     status: exempt
-    comment: HACS fork; brand assets live in the upstream home-assistant/brands repo.
+    comment: >-
+      HACS fork; not registered in the core home-assistant/brands repo.
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done
@@ -42,10 +43,14 @@ rules:
   diagnostics: done
   discovery:
     status: exempt
-    comment: Atrea RD5 units expose no mDNS/SSDP/DHCP discovery; setup is by IP.
+    comment: >-
+      Atrea RD5 units expose no zeroconf/mDNS/SSDP service and present no
+      reliable DHCP OUI to match against; setup is by manual IP entry only.
   discovery-update-info:
     status: exempt
-    comment: No network discovery protocol to update connection info from.
+    comment: >-
+      No network discovery protocol exists for these units, so there is no
+      discovery payload from which to update connection info.
   docs-data-update: done
   docs-examples: done
   docs-known-limitations: done
@@ -55,34 +60,39 @@ rules:
   docs-use-cases: done
   dynamic-devices:
     status: exempt
-    comment: One device per config entry; no dynamically added sub-devices.
+    comment: >-
+      One device per config entry; the integration is not a hub and never
+      adds or removes sub-devices at runtime.
   entity-category:
     status: exempt
-    comment: Single device whose entities are all primary; no diagnostic/config split.
-  entity-device-class:
-    status: exempt
-    comment: The climate entity has no applicable device class.
+    comment: >-
+      Only primary entities are created (climate, update); there are no
+      noisy/diagnostic or configuration entities to categorize.
+  entity-device-class: done
   entity-disabled-by-default:
     status: exempt
-    comment: Single device, all entities are primary and enabled by default.
+    comment: >-
+      Only primary entities are created (climate, update); there are no
+      noisy or rarely-useful entities to disable by default.
   entity-translations:
     status: exempt
-    comment: Single primary climate entity inherits the device name; the update entity is translated.
+    comment: >-
+      The climate entity is the device's primary feature, so its name comes
+      from the device (has_entity_name). Preset/program values are
+      device-defined free strings and cannot use the standard
+      state-translation mechanism. The update entity's name IS translated
+      (translation_key=firmware).
   exception-translations: done
-  icon-translations:
-    status: exempt
-    comment: The climate icon is dynamic (alert/off/preset-driven) and computed in the icon property; icons.json provides only the static default.
+  icon-translations: done
   reconfiguration-flow: done
-  repair-issues:
-    status: exempt
-    comment: No actionable repair conditions beyond the reauth flow.
+  repair-issues: done
   stale-devices:
     status: exempt
-    comment: One device per config entry; the device is removed with the entry.
+    comment: >-
+      One device per config entry; the device is removed together with the
+      entry. No hub managing a fluctuating device set.
 
   # Platinum
   async-dependency: done
   inject-websession: done
-  strict-typing:
-    status: exempt
-    comment: The pyatrea dependency ships no py.typed marker or type stubs.
+  strict-typing: done
