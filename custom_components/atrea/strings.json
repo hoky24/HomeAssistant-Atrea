@@ -101,6 +101,12 @@
       }
     }
   },
+  "issues": {
+    "unit_unreachable": {
+      "title": "Atrea unit unreachable",
+      "description": "The Atrea unit {name} has been unreachable for several update cycles. Check the unit's power and network connection, or reconfigure its IP address."
+    }
+  },
   "exceptions": {
     "invalid_fan_mode": {
       "message": "Fan percentage {value} is out of range (12-100)."

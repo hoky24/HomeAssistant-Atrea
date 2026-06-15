@@ -2,10 +2,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pyatrea import AtreaMode, AtreaStatus
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.atrea.const import DOMAIN
 from custom_components.atrea.coordinator import AtreaDataUpdateCoordinator
 
 
@@ -90,3 +93,89 @@ async def test_connection_error_maps_to_updatefailed(hass):
     coord = AtreaDataUpdateCoordinator(hass, client)
     with pytest.raises(UpdateFailed):
         await coord._async_update_data()
+
+
+def _entry(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        title="Atrea",
+        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_repair_issue_after_consecutive_failures(hass):
+    client, _ = make_client()
+    client.fetch_status = AsyncMock(side_effect=AtreaConnectionError("net"))
+    entry = _entry(hass)
+    coord = AtreaDataUpdateCoordinator(hass, client, config_entry=entry)
+
+    registry = ir.async_get(hass)
+    issue_id = f"unreachable_{entry.entry_id}"
+
+    # Below threshold: no issue yet.
+    for _ in range(4):
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+    # 5th consecutive failure crosses the threshold: issue raised.
+    with pytest.raises(UpdateFailed):
+        await coord._async_update_data()
+    issue = registry.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "unit_unreachable"
+    assert issue.translation_placeholders == {"name": "Atrea"}
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.is_fixable is False
+
+
+async def test_repair_issue_cleared_on_recovery(hass):
+    client, status = make_client()
+    client.fetch_status = AsyncMock(side_effect=AtreaConnectionError("net"))
+    entry = _entry(hass)
+    coord = AtreaDataUpdateCoordinator(hass, client, config_entry=entry)
+    registry = ir.async_get(hass)
+    issue_id = f"unreachable_{entry.entry_id}"
+
+    for _ in range(5):
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    # Recovery: a successful poll clears the issue.
+    client.fetch_status = AsyncMock(return_value=status)
+    await coord._async_update_data()
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_auth_failure_does_not_raise_repair(hass):
+    client, _ = make_client()
+    client.fetch_status = AsyncMock(side_effect=AtreaAuthError("denied"))
+    entry = _entry(hass)
+    coord = AtreaDataUpdateCoordinator(hass, client, config_entry=entry)
+    registry = ir.async_get(hass)
+    issue_id = f"unreachable_{entry.entry_id}"
+
+    for _ in range(6):
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+    # Auth is handled by reauth, not a repair issue.
+    assert registry.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_repair_issue_without_config_entry(hass):
+    client, _ = make_client()
+    client.fetch_status = AsyncMock(side_effect=AtreaConnectionError("net"))
+    coord = AtreaDataUpdateCoordinator(hass, client)
+    registry = ir.async_get(hass)
+
+    for _ in range(5):
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+    # Falls back to a constant entry_id; an issue is still created and named.
+    issue = registry.async_get_issue(DOMAIN, "unreachable_unknown")
+    assert issue is not None
+    assert issue.translation_placeholders == {"name": "Atrea"}
