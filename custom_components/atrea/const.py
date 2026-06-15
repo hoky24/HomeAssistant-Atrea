@@ -17,6 +17,10 @@ SUPPORT_FLAGS = (
 STATE_UNKNOWN = "unknown"
 CONF_FAN_MODES = "fan_modes"
 CONF_PRESETS = "presets"
+CONF_TRANSPORT = "transport"
+CONF_SLAVE_ID = "slave_id"
+TRANSPORT_HTTP = "http"
+TRANSPORT_MODBUS = "modbus"
 DEFAULT_FAN_MODE_LIST = "12,20,30,40,50,60,70,80,90,100"
 ALL_PRESET_LIST = [
     "Off",

@@ -19,16 +19,20 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pyatrea import AtreaClient
+from pyatrea import HttpTransport, ModbusTransport
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError
 
 from .const import (
     ALL_PRESET_LIST,
     CONF_FAN_MODES,
     CONF_PRESETS,
+    CONF_SLAVE_ID,
+    CONF_TRANSPORT,
     DEFAULT_FAN_MODE_LIST,
     DOMAIN,
     LOGGER,
+    TRANSPORT_HTTP,
+    TRANSPORT_MODBUS,
 )
 
 
@@ -36,6 +40,8 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Atrea."""
 
     VERSION = 2
+
+    _transport: str
 
     @staticmethod
     @callback
@@ -46,7 +52,28 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial single-step user form."""
+        """Ask which transport to use, then branch to its step."""
+        if user_input is not None:
+            self._transport = user_input[CONF_TRANSPORT]
+            if self._transport == TRANSPORT_MODBUS:
+                return await self.async_step_modbus()
+            return await self.async_step_http()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_TRANSPORT, default=TRANSPORT_HTTP
+                    ): vol.In([TRANSPORT_HTTP, TRANSPORT_MODBUS]),
+                }
+            ),
+        )
+
+    async def async_step_http(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect and validate HTTP connection details."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -58,14 +85,14 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_configured()
 
-            client = AtreaClient(
+            transport = HttpTransport(
                 host, port, password, async_get_clientsession(self.hass)
             )
             try:
-                if not await client.is_atrea_unit():
+                if not await transport.is_atrea_unit():
                     errors["base"] = "not_atrea_unit"
                 else:
-                    await client.fetch_status()
+                    await transport.read()
             except AtreaAuthError:
                 errors["base"] = "invalid_auth"
             except AtreaConnectionError:
@@ -75,6 +102,7 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(
                         title=host,
                         data={
+                            CONF_TRANSPORT: TRANSPORT_HTTP,
                             CONF_IP_ADDRESS: host,
                             CONF_PORT: port,
                             CONF_PASSWORD: password,
@@ -83,7 +111,7 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
 
         return self.async_show_form(
-            step_id="user",
+            step_id="http",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_IP_ADDRESS): str,
@@ -95,12 +123,70 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_modbus(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect and validate Modbus TCP connection details."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = user_input[CONF_IP_ADDRESS]
+            port = user_input[CONF_PORT]
+            slave_id = user_input[CONF_SLAVE_ID]
+            name = user_input.get(CONF_NAME, "Atrea")
+
+            await self.async_set_unique_id(host)
+            self._abort_if_unique_id_configured()
+
+            transport = ModbusTransport(host, port, slave_id)
+            try:
+                await transport.connect()
+                if not await transport.is_atrea_unit():
+                    errors["base"] = "not_atrea_unit"
+                else:
+                    await transport.read()
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
+            else:
+                if not errors:
+                    return self.async_create_entry(
+                        title=host,
+                        data={
+                            CONF_TRANSPORT: TRANSPORT_MODBUS,
+                            CONF_IP_ADDRESS: host,
+                            CONF_PORT: port,
+                            CONF_SLAVE_ID: slave_id,
+                            CONF_NAME: name,
+                        },
+                    )
+            finally:
+                await transport.close()
+
+        return self.async_show_form(
+            step_id="modbus",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_IP_ADDRESS): str,
+                    vol.Required(CONF_PORT, default=502): int,
+                    vol.Required(CONF_SLAVE_ID, default=1): int,
+                    vol.Optional(CONF_NAME, default="Atrea"): str,
+                }
+            ),
+            errors=errors,
+        )
+
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Reconfigure connection details (ip/port/password/name)."""
+        """Reconfigure HTTP connection details (ip/port/password/name).
+
+        Validation honours the entry's stored transport. Modbus reconfigure of
+        ip/port/slave_id via a dedicated form is a follow-up; for now the form
+        is HTTP-shaped and Modbus entries are re-validated over Modbus.
+        """
         errors: dict[str, str] = {}
         reconfigure_entry = self._get_reconfigure_entry()
+        transport_kind = reconfigure_entry.data.get(CONF_TRANSPORT, TRANSPORT_HTTP)
 
         if user_input is not None:
             host = user_input[CONF_IP_ADDRESS]
@@ -111,29 +197,53 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_mismatch()
 
-            client = AtreaClient(
-                host, port, password, async_get_clientsession(self.hass)
-            )
-            try:
-                if not await client.is_atrea_unit():
-                    errors["base"] = "not_atrea_unit"
+            if transport_kind == TRANSPORT_MODBUS:
+                slave_id = reconfigure_entry.data.get(CONF_SLAVE_ID, 1)
+                transport = ModbusTransport(host, port, slave_id)
+                try:
+                    await transport.connect()
+                    if not await transport.is_atrea_unit():
+                        errors["base"] = "not_atrea_unit"
+                    else:
+                        await transport.read()
+                except AtreaConnectionError:
+                    errors["base"] = "cannot_connect"
                 else:
-                    await client.fetch_status()
-            except AtreaAuthError:
-                errors["base"] = "invalid_auth"
-            except AtreaConnectionError:
-                errors["base"] = "cannot_connect"
+                    if not errors:
+                        return self.async_update_reload_and_abort(
+                            reconfigure_entry,
+                            data_updates={
+                                CONF_IP_ADDRESS: host,
+                                CONF_PORT: port,
+                                CONF_NAME: name,
+                            },
+                        )
+                finally:
+                    await transport.close()
             else:
-                if not errors:
-                    return self.async_update_reload_and_abort(
-                        reconfigure_entry,
-                        data_updates={
-                            CONF_IP_ADDRESS: host,
-                            CONF_PORT: port,
-                            CONF_PASSWORD: password,
-                            CONF_NAME: name,
-                        },
-                    )
+                http = HttpTransport(
+                    host, port, password, async_get_clientsession(self.hass)
+                )
+                try:
+                    if not await http.is_atrea_unit():
+                        errors["base"] = "not_atrea_unit"
+                    else:
+                        await http.read()
+                except AtreaAuthError:
+                    errors["base"] = "invalid_auth"
+                except AtreaConnectionError:
+                    errors["base"] = "cannot_connect"
+                else:
+                    if not errors:
+                        return self.async_update_reload_and_abort(
+                            reconfigure_entry,
+                            data_updates={
+                                CONF_IP_ADDRESS: host,
+                                CONF_PORT: port,
+                                CONF_PASSWORD: password,
+                                CONF_NAME: name,
+                            },
+                        )
 
         data = reconfigure_entry.data
         return self.async_show_form(
@@ -172,11 +282,11 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             password = user_input.get(CONF_PASSWORD, "")
-            client = AtreaClient(
+            transport = HttpTransport(
                 host, port, password, async_get_clientsession(self.hass)
             )
             try:
-                await client.fetch_status()
+                await transport.read()
             except AtreaAuthError:
                 errors["base"] = "invalid_auth"
             except AtreaConnectionError:
