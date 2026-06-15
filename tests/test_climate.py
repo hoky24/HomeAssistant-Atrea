@@ -37,6 +37,16 @@ def test_has_entity_name_and_primary_name_none():
     assert e._attr_name is None
 
 
+def test_translation_key_binds_icons_without_breaking_name():
+    e = entity(make_coordinator({}))
+    # translation_key binds icons.json (entity.climate.atrea.default) as the
+    # static default icon.
+    assert e._attr_translation_key == "atrea"
+    # Primary entity: _attr_name stays None so the entity inherits the device
+    # name rather than a translated entity name.
+    assert e._attr_name is None
+
+
 def test_hvac_mode_auto_when_weekly():
     e = entity(make_coordinator({"H10700": "1"}, program=AtreaProgram.WEEKLY))
     assert e.hvac_mode == HVACMode.AUTO

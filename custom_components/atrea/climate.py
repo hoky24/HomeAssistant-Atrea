@@ -101,6 +101,13 @@ async def async_setup_entry(
 class AtreaClimate(AtreaEntity, ClimateEntity):
     """Render-only climate entity deriving state from the coordinator."""
 
+    # Binds icons.json (entity.climate.atrea.default) as the static default
+    # icon. The dynamic ``icon`` property below still overrides per-state
+    # (alert/off/preset). Because this is the primary entity with
+    # ``_attr_name = None``, the name stays the device name, not a translated
+    # entity name.
+    _attr_translation_key = "atrea"
+
     def __init__(
         self,
         coordinator: AtreaDataUpdateCoordinator,
