@@ -32,6 +32,14 @@ def test_latest_falls_back_to_installed_when_unknown():
     assert e.latest_version == "2.0.1"
 
 
+def test_device_class_is_firmware():
+    from homeassistant.components.update import UpdateDeviceClass
+
+    coord = make_coordinator()
+    e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")
+    assert e.device_class == UpdateDeviceClass.FIRMWARE
+
+
 def test_unique_id_distinct_from_climate():
     coord = make_coordinator()
     e = AtreaUpdate(coord, "e", "Atrea", "1.2.3.4")

@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
+from homeassistant.components.update import (
+    UpdateDeviceClass,
+    UpdateEntity,
+    UpdateEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
 from homeassistant.core import HomeAssistant
@@ -40,6 +44,8 @@ async def async_setup_entry(
 
 class AtreaUpdate(AtreaEntity, UpdateEntity):
     """Render-only update entity deriving firmware state from the coordinator."""
+
+    _attr_device_class = UpdateDeviceClass.FIRMWARE
 
     def __init__(
         self,
