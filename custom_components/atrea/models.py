@@ -7,6 +7,7 @@ from pyatrea import AtreaMode, AtreaStatus
 
 if TYPE_CHECKING:
     from pyatrea import AtreaClient
+    from pyatrea.transport import AtreaTransport
 
     from .coordinator import AtreaDataUpdateCoordinator
 
@@ -31,3 +32,4 @@ class AtreaData:
 class AtreaRuntimeData:
     client: "AtreaClient"
     coordinator: "AtreaDataUpdateCoordinator"
+    transport: "AtreaTransport"

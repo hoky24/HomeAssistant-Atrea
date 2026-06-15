@@ -84,6 +84,26 @@ async def test_setup_entry_builds_modbus_transport(hass, request):
     http_cls.assert_not_called()
 
 
+async def test_unload_entry_closes_transport(hass, request):
+    """Unloading an entry must close the transport (no Modbus socket leak)."""
+    entry = MockConfigEntry(domain=DOMAIN, version=2, data={
+        "ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"})
+    entry.add_to_hass(hass)
+    stop, _, http_cls, _modbus = _patched_client()
+    request.addfinalizer(stop)
+    transport = http_cls.return_value
+    transport.close = AsyncMock()
+    with patch("homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+               AsyncMock(return_value=True)), \
+         patch("homeassistant.config_entries.ConfigEntries.async_unload_platforms",
+               AsyncMock(return_value=True)):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+    transport.close.assert_awaited_once()
+
+
 async def test_setup_entry_auth_failure_aborts(hass, request):
     from pyatrea.exceptions import AtreaAuthError
     entry = MockConfigEntry(domain=DOMAIN, version=2, data={

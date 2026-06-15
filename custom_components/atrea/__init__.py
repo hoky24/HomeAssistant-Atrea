@@ -32,13 +32,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> boo
     client = AtreaClient(transport)
     coordinator = AtreaDataUpdateCoordinator(hass, client, config_entry=entry)
     await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data = AtreaRuntimeData(client=client, coordinator=coordinator)
+    entry.runtime_data = AtreaRuntimeData(
+        client=client, coordinator=coordinator, transport=transport
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> bool:
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded and entry.runtime_data is not None:
+        await entry.runtime_data.transport.close()
+    return unloaded
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

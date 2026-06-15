@@ -11,9 +11,10 @@ def test_atrea_data_holds_fields():
 
 
 def test_runtime_data_holds_client_and_coordinator():
-    rd = AtreaRuntimeData(client="C", coordinator="K")
+    rd = AtreaRuntimeData(client="C", coordinator="K", transport="T")
     assert rd.client == "C"
     assert rd.coordinator == "K"
+    assert rd.transport == "T"
 
 
 def test_const_has_required_names():
