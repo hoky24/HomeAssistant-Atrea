@@ -1,27 +1,27 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
-from pyatrea import AtreaMode, AtreaStatus
+from pyatrea import AtreaMode, AtreaStatus, Descriptors
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.atrea.const import DOMAIN
 from custom_components.atrea.coordinator import AtreaDataUpdateCoordinator
 
+# What the patched AtreaClient.supported_from returns: writable map + 3 mode maps.
+_SUPPORTED = ({AtreaMode.VENTILATION: True}, {}, {}, {})
+
 
 def make_client():
     c = MagicMock()
     status = AtreaStatus(registers={"H10700": "0", "H10705": "2"})
     c.fetch_status = AsyncMock(return_value=status)
-    c.fetch_userctrl = AsyncMock(
-        return_value=({AtreaMode.VENTILATION: True}, {}, {}, {})
+    c.fetch_descriptors = AsyncMock(
+        return_value=Descriptors(user_labels={}, translations={"params": {}, "words": {}})
     )
-    c.fetch_config_dir = AsyncMock(return_value=None)
-    c.fetch_user_labels = AsyncMock(return_value={})
-    c.fetch_translations = AsyncMock(return_value={"params": {}, "words": {}})
     c.model_of.return_value = None
     c.version_of.return_value = "2.0.1"
     c.latest_version_of.return_value = "0.0"
@@ -32,8 +32,13 @@ def make_client():
 async def test_update_builds_data(hass):
     client, status = make_client()
     coord = AtreaDataUpdateCoordinator(hass, client)
-    data = await coord._async_update_data()
+    with patch(
+        "custom_components.atrea.coordinator.AtreaClient.supported_from",
+        return_value=_SUPPORTED,
+    ):
+        data = await coord._async_update_data()
     assert data.status is status
+    # supported_modes is derived per cycle via supported_from(status, descriptors)
     assert data.supported_modes == {AtreaMode.VENTILATION: True}
     assert data.version == "2.0.1"
 
@@ -41,16 +46,17 @@ async def test_update_builds_data(hass):
 async def test_static_data_fetched_once(hass):
     client, _ = make_client()
     coord = AtreaDataUpdateCoordinator(hass, client)
-    await coord._async_update_data()
-    await coord._async_update_data()
-    # config_dir/translations/user_labels fetched only on the first cycle
-    assert client.fetch_config_dir.await_count == 1
-    assert client.fetch_translations.await_count == 1
-    assert client.fetch_user_labels.await_count == 1
-    # userctrl is firmware-static: fetched only on the first cycle
-    assert client.fetch_userctrl.await_count == 1
-    # status fetched every cycle (bitmask overlay recomputed per cycle)
+    with patch(
+        "custom_components.atrea.coordinator.AtreaClient.supported_from",
+        return_value=_SUPPORTED,
+    ) as supported_from:
+        await coord._async_update_data()
+        await coord._async_update_data()
+    # descriptors are firmware-static: fetched only on the first cycle
+    assert client.fetch_descriptors.await_count == 1
+    # status fetched every cycle; supported_from recomputed per cycle
     assert client.fetch_status.await_count == 2
+    assert supported_from.call_count == 2
 
 
 async def test_partial_poll_retains_previous_registers(hass):
@@ -71,12 +77,11 @@ async def test_invalidate_static_forces_refetch(hass):
     client, _ = make_client()
     coord = AtreaDataUpdateCoordinator(hass, client)
     await coord._async_update_data()
-    assert client.fetch_userctrl.await_count == 1
+    assert client.fetch_descriptors.await_count == 1
     coord.invalidate_static()
     await coord._async_update_data()
-    # static data re-fetched after invalidation
-    assert client.fetch_userctrl.await_count == 2
-    assert client.fetch_config_dir.await_count == 2
+    # static descriptors re-fetched after invalidation
+    assert client.fetch_descriptors.await_count == 2
 
 
 async def test_auth_error_maps_to_configentryauthfailed(hass):

@@ -6,7 +6,7 @@ from pyatrea import AtreaMode
 
 DOMAIN = "atrea"
 LOGGER = logging.getLogger(__name__)
-MIN_TIME_BETWEEN_SCANS = timedelta(seconds=10)
+MIN_TIME_BETWEEN_SCANS = timedelta(seconds=30)
 SUPPORT_FLAGS = (
     ClimateEntityFeature.TARGET_TEMPERATURE
     | ClimateEntityFeature.FAN_MODE

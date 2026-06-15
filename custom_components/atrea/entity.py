@@ -14,7 +14,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
-from pyatrea import AtreaConnectionError, AtreaParams, CommandBuilder
+from pyatrea import AtreaConnectionError, CommandBuilder
 
 from .const import DOMAIN
 from .coordinator import AtreaDataUpdateCoordinator
@@ -72,11 +72,7 @@ class AtreaEntity(CoordinatorEntity[AtreaDataUpdateCoordinator]):
     def _builder(self) -> CommandBuilder:
         """Build a CommandBuilder seeded from current coordinator data."""
         data = self.coordinator.data
-        regs = set(data.status.registers) if data and data.status else set()
-        params = data.status.params if data and data.status else AtreaParams()
         return self.coordinator.client.command_builder(
-            params,
-            regs,
             modes_to_ids=data.modes_to_ids if data else {},
             supported_modes=data.supported_modes if data else {},
         )

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from xml.etree import ElementTree as ET
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from pyatrea import AtreaClient, AtreaMode, AtreaStatus
+from pyatrea import AtreaClient, AtreaStatus, Descriptors
 from pyatrea.exceptions import AtreaAuthError, AtreaConnectionError, AtreaResponseError
-from pyatrea.parser import supported_modes_from_status
 
 from .const import DOMAIN, LOGGER, MIN_TIME_BETWEEN_SCANS
 from .models import AtreaData
@@ -34,17 +31,9 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         )
         self.client = client
         self._static_loaded = False
-        self._config_dir: ET.Element | None = None
-        self._translations: dict[str, dict[str, object]] = {
-            "params": {},
-            "words": {},
-        }
-        self._user_labels: dict[str, str] = {}
-        # Firmware-static userctrl data, fetched once and cached.
-        self._ec_writable: dict[AtreaMode, bool] = {}
-        self._ids_to_modes: dict[int, AtreaMode] = {}
-        self._modes_to_ids: dict[AtreaMode, int] = {}
-        self._forced_modes: dict[int, AtreaMode] = {}
+        # Firmware-static descriptors (config_dir, translations, user_labels,
+        # mode maps), fetched once and cached.
+        self._descriptors: Descriptors = Descriptors()
         # Repair-issue bookkeeping for prolonged unreachability.
         self._consecutive_failures = 0
         self._unreachable_issue_active = False
@@ -89,22 +78,14 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
 
     async def _async_update_data(self) -> AtreaData:
         try:
-            status = await self.client.fetch_status(with_params=True)
+            status = await self.client.fetch_status()
             # Retain last-good registers: a partial poll must not zero attributes
             # the orchestrator reads (legacy kept last-known per-attribute).
             if self.data is not None and self.data.status is not None:
                 merged = {**self.data.status.registers, **status.registers}
                 status = AtreaStatus(registers=merged, params=status.params)
             if not self._static_loaded:
-                (
-                    self._ec_writable,
-                    self._ids_to_modes,
-                    self._modes_to_ids,
-                    self._forced_modes,
-                ) = await self.client.fetch_userctrl()
-                self._config_dir = await self.client.fetch_config_dir()
-                self._translations = await self.client.fetch_translations()
-                self._user_labels = await self.client.fetch_user_labels()
+                self._descriptors = await self.client.fetch_descriptors()
                 self._static_loaded = True
         except AtreaAuthError as err:
             # Auth failures are repaired via the reauth flow (ConfigEntryAuthFailed),
@@ -120,22 +101,23 @@ class AtreaDataUpdateCoordinator(DataUpdateCoordinator[AtreaData]):
         self._consecutive_failures = 0
         self._clear_unreachable_issue()
 
-        # Recompute only the dynamic I12004 writable bitmask each cycle; fall
-        # back to the cached static userctrl ModeEC when the bitmask is absent.
-        bitmask = supported_modes_from_status(status)
-        supported = bitmask if bitmask is not None else self._ec_writable
+        # Recompute the writable/mode maps each cycle from the current status
+        # overlaid on the cached static descriptors (pure, no I/O).
+        supported, ids_to_modes, modes_to_ids, forced = AtreaClient.supported_from(
+            status, self._descriptors
+        )
 
         return AtreaData(
             status=status,
             supported_modes=supported,
-            ids_to_modes=self._ids_to_modes,
-            modes_to_ids=self._modes_to_ids,
-            forced_modes=self._forced_modes,
-            user_labels=self._user_labels,
-            translations=self._translations,
-            model=self.client.model_of(status, self._config_dir),
+            ids_to_modes=ids_to_modes,
+            modes_to_ids=modes_to_ids,
+            forced_modes=forced,
+            user_labels=self._descriptors.user_labels,
+            translations=self._descriptors.translations,
+            model=self.client.model_of(status, self._descriptors.config_dir),
             version=self.client.version_of(status),
             latest_version=self.client.latest_version_of(status),
             unit_id=self.client.id_of(status),
-            config_dir=self._config_dir,
+            config_dir=self._descriptors.config_dir,
         )

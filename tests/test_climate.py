@@ -117,8 +117,6 @@ def writable_coord(program=AtreaProgram.MANUAL):
     coord = make_coordinator({"H10708": "0", "H01020": "0", "H10700": "0"},
                              program=program)
     builder = CommandBuilder(
-        params=AtreaParams(ids=["H10708", "H01020", "H10700", "H10701",
-                                "H10702", "H10703", "H01015", "H01016", "H01017"]),
         known_registers={"H10708", "H01020", "H10700", "H10701", "H10702",
                          "H10703", "H01015", "H01016", "H01017"})
     coord.client.command_builder.return_value = builder
@@ -175,7 +173,6 @@ async def test_set_hvac_mode_auto_skips_redundant_program_write():
 
 async def test_set_temperature_commits():
     coord, builder = writable_coord()
-    builder.params.ids.extend(["H10710", "H01021"])
     builder.known_registers.update({"H10710", "H01021"})
     e = entity(coord)
     await e.async_set_temperature(**{ATTR_TEMPERATURE: 22})
