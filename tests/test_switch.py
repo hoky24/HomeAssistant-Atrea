@@ -15,6 +15,7 @@ def coord(regs):
     c.client.command_builder.return_value = CommandBuilder()
     c.client.commit = AsyncMock()
     c.async_request_refresh = AsyncMock()
+    c.last_update_success = True
     return c
 
 
@@ -29,3 +30,20 @@ async def test_turn_on_writes_coil():
     await e.async_turn_on()
     assert co.client.command_builder.return_value.commands.get("C10902") == "00001"
     co.client.commit.assert_awaited_once()
+
+
+def test_switch_is_config_category():
+    from homeassistant.const import EntityCategory
+
+    e = AtreaNightPrecooling(coord({"C10902": "0", "H11022": "0"}), "e", "A", "1.2.3.4")
+    assert e.entity_category == EntityCategory.CONFIG
+
+
+def test_switch_available_when_h11022_zero():
+    e = AtreaNightPrecooling(coord({"C10902": "0", "H11022": "0"}), "e", "A", "1.2.3.4")
+    assert e.available is True
+
+
+def test_switch_unavailable_when_h11022_nonzero():
+    e = AtreaNightPrecooling(coord({"C10902": "0", "H11022": "1"}), "e", "A", "1.2.3.4")
+    assert e.available is False

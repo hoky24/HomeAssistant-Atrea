@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
+from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -32,9 +32,16 @@ async def async_setup_entry(
 
 
 class AtreaNightPrecooling(AtreaEntity, SwitchEntity):
-    """Night precooling coil (C10902) for the Atrea unit."""
+    """Automatic night-precooling config coil (C10902) for the Atrea unit.
+
+    This is a COMMISSIONING-menu config flag ("enable automatic night
+    precooling"), not the runtime night-precooling regime. It is only editable
+    while the unit reports register ``H11022 == 0``; otherwise it is gated
+    unavailable.
+    """
 
     _attr_translation_key = "night_precooling"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -45,6 +52,13 @@ class AtreaNightPrecooling(AtreaEntity, SwitchEntity):
     ) -> None:
         super().__init__(coordinator, entry_id, name, ip)
         self._attr_unique_id = f"{self._device_slug}_night_precooling"
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        if not super().available or data is None or data.status is None:
+            return False
+        return data.status.registers.get("H11022", "0") == "0"
 
     @property
     def is_on(self) -> bool:
