@@ -276,5 +276,29 @@
     "missing_temperature": {
       "message": "No temperature provided."
     }
+  },
+  "services": {
+    "apply": {
+      "name": "Apply settings",
+      "description": "Atomically applies program, operating mode, power, and/or target supply temperature to an Atrea unit in a single commit.",
+      "fields": {
+        "program": {
+          "name": "Program",
+          "description": "Operating program to set: Manual, Schedule (weekly), or Temporary."
+        },
+        "mode": {
+          "name": "Operating mode",
+          "description": "Operating mode (regime) display name, e.g. Off or Ventilation. Must be supported by the unit."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Fan power in percent (12-100)."
+        },
+        "target_temperature": {
+          "name": "Target supply temperature",
+          "description": "Target supply air temperature in degrees Celsius."
+        }
+      }
+    }
   }
 }

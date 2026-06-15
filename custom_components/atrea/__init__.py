@@ -6,9 +6,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from pyatrea import AtreaClient, HttpTransport, ModbusTransport
 
-from .const import CONF_SLAVE_ID, CONF_TRANSPORT, PLATFORMS, TRANSPORT_MODBUS
+from .const import CONF_SLAVE_ID, CONF_TRANSPORT, DOMAIN, PLATFORMS, TRANSPORT_MODBUS
 from .coordinator import AtreaDataUpdateCoordinator
 from .models import AtreaRuntimeData
+from .services import SERVICE_APPLY, async_setup_services, async_unload_services
 
 type AtreaConfigEntry = ConfigEntry[AtreaRuntimeData]
 
@@ -36,6 +37,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> boo
         client=client, coordinator=coordinator, transport=transport
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if not hass.services.has_service(DOMAIN, SERVICE_APPLY):
+        async_setup_services(hass)
     return True
 
 
@@ -43,6 +46,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: AtreaConfigEntry) -> bo
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded and entry.runtime_data is not None:
         await entry.runtime_data.transport.close()
+        remaining = [
+            e
+            for e in hass.config_entries.async_loaded_entries(DOMAIN)
+            if e.entry_id != entry.entry_id
+        ]
+        if not remaining and hass.services.has_service(DOMAIN, SERVICE_APPLY):
+            async_unload_services(hass)
     return unloaded
 
 
