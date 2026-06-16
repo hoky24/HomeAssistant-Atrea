@@ -24,6 +24,18 @@ def test_efficiency_guards_zero_denominator():
     assert derive.efficiency(st) is None
 
 
+def test_efficiency_none_below_min_gradient():
+    # denom = 2 K (< 3) → outside≈indoor, efficiency undefined even if nonzero
+    st = s({"I10212": "180", "I10211": "190", "I10213": "210"})
+    assert derive.efficiency(st) is None
+
+
+def test_efficiency_none_when_nonphysical():
+    # supply 10 / outside 15 / extract 25 → (10-15)/10*100 = -50 % → None
+    st = s({"I10212": "100", "I10211": "150", "I10213": "250"})
+    assert derive.efficiency(st) is None
+
+
 def test_fan_hours_32bit():
     st = s({"H13500": "20842", "H13501": "1"})
     assert derive.fan_hours(st, "H13500", "H13501") == 20842 + 65536

@@ -36,9 +36,16 @@ def efficiency(status: AtreaStatus | None) -> float | None:
     if supply is None or outside is None or extract is None:
         return None
     denom = extract - outside
-    if abs(denom) < 0.1:
+    # Recovery efficiency is only meaningful with a real outdoor/indoor gradient.
+    # Near outside≈indoor the ratio explodes (±1000 %), so require a minimum 3 K
+    # spread and clamp to the physical 0..100 % range; anything outside is a
+    # transient artefact and is reported as unknown rather than a wild value.
+    if abs(denom) < 3:
         return None
-    return round((supply - outside) / denom * 100, 1)
+    value = (supply - outside) / denom * 100
+    if not 0 <= value <= 100:
+        return None
+    return round(value, 1)
 
 
 def fan_hours(status: AtreaStatus | None, low: str, high: str) -> int | None:
