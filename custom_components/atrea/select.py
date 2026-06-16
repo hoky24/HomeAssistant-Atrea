@@ -58,8 +58,12 @@ SELECTS: tuple[AtreaSelectEntityDescription, ...] = (
         key="zone",
         read_register="H10707",
         options_map=ZONE_OPTIONS,
-        # zone idw write-target is H10717
-        write_fn=lambda b, v: b.commands.__setitem__("H10717", f"{v:05}"),
+        # zone write register is H10711 (read H10707 + 4, the same read→write
+        # offset as power H10704→H10708 / mode H10705→H10709 / temp H10706→H10710).
+        # The userctrl idw="H10717" is an info twin, NOT the write target —
+        # writing it had no effect on either transport (HW-confirmed); the unit's
+        # own web UI writes H10711.
+        write_fn=lambda b, v: b.commands.__setitem__("H10711", f"{v:05}"),
     ),
 )
 

@@ -48,11 +48,13 @@ async def test_program_select_writes():
     co.client.commit.assert_awaited_once()
 
 
-async def test_zone_select_writes_idw():
+async def test_zone_select_writes_h10711():
+    # zone write register is H10711 (read H10707 + 4), NOT the userctrl idw twin
+    # H10717 — HW-confirmed against the unit's own web UI.
     co = coord({"H10707": "0"})
     e = AtreaSelect(co, "e", "A", "1.2.3.4", _d("zone"))
     await e.async_select_option("1+2")
-    assert co.client.command_builder.return_value.commands.get("H10717") == "00002"
+    assert co.client.command_builder.return_value.commands.get("H10711") == "00002"
 
 
 def test_season_current():
