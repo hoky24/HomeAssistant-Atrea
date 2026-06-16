@@ -192,7 +192,17 @@
       },
       "reconfigure": {
         "title": "Reconfigure Atrea unit",
-        "description": "Update the connection details for your Atrea ventilation unit.",
+        "description": "Change how Home Assistant talks to the unit, then update the connection details.",
+        "data": {
+          "transport": "Transport"
+        },
+        "data_description": {
+          "transport": "HTTP uses the unit's web interface; Modbus uses Modbus TCP (must be enabled on the unit)."
+        }
+      },
+      "reconfigure_http": {
+        "title": "Reconfigure Atrea unit (HTTP)",
+        "description": "Enter the HTTP connection details for your Atrea ventilation unit.",
         "data": {
           "ip_address": "IP address",
           "port": "Port",
@@ -203,6 +213,22 @@
           "ip_address": "The IP address or hostname of the Atrea unit.",
           "port": "The HTTP port of the Atrea web interface (default 80).",
           "password": "Password for the unit, if one is configured. Leave blank if none.",
+          "name": "Friendly name for this unit in Home Assistant."
+        }
+      },
+      "reconfigure_modbus": {
+        "title": "Reconfigure Atrea unit (Modbus TCP)",
+        "description": "Enter the Modbus TCP connection details for your Atrea ventilation unit.",
+        "data": {
+          "ip_address": "IP address",
+          "port": "Port",
+          "slave_id": "Slave ID",
+          "name": "Name"
+        },
+        "data_description": {
+          "ip_address": "The IP address or hostname of the Atrea unit.",
+          "port": "The Modbus TCP port of the Atrea unit (default 502).",
+          "slave_id": "The Modbus slave/unit ID (default 1).",
           "name": "Friendly name for this unit in Home Assistant."
         }
       }

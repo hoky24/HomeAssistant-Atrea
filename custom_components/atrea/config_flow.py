@@ -178,15 +178,39 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Reconfigure HTTP connection details (ip/port/password/name).
+        """Pick the transport, then branch to its reconfigure sub-step.
 
-        Validation honours the entry's stored transport. Modbus reconfigure of
-        ip/port/slave_id via a dedicated form is a follow-up; for now the form
-        is HTTP-shaped and Modbus entries are re-validated over Modbus.
+        Unlike the initial setup, reconfigure allows switching the backend
+        (HTTP <-> Modbus TCP) without removing and re-adding the integration.
         """
+        reconfigure_entry = self._get_reconfigure_entry()
+        current_transport = reconfigure_entry.data.get(
+            CONF_TRANSPORT, TRANSPORT_HTTP
+        )
+
+        if user_input is not None:
+            self._transport = user_input[CONF_TRANSPORT]
+            if self._transport == TRANSPORT_MODBUS:
+                return await self.async_step_reconfigure_modbus()
+            return await self.async_step_reconfigure_http()
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_TRANSPORT, default=current_transport
+                    ): vol.In([TRANSPORT_HTTP, TRANSPORT_MODBUS]),
+                }
+            ),
+        )
+
+    async def async_step_reconfigure_http(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect and validate HTTP details for a reconfigure."""
         errors: dict[str, str] = {}
         reconfigure_entry = self._get_reconfigure_entry()
-        transport_kind = reconfigure_entry.data.get(CONF_TRANSPORT, TRANSPORT_HTTP)
 
         if user_input is not None:
             host = user_input[CONF_IP_ADDRESS]
@@ -197,57 +221,34 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_mismatch()
 
-            if transport_kind == TRANSPORT_MODBUS:
-                slave_id = reconfigure_entry.data.get(CONF_SLAVE_ID, 1)
-                transport = ModbusTransport(host, port, slave_id)
-                try:
-                    await transport.connect()
-                    if not await transport.is_atrea_unit():
-                        errors["base"] = "not_atrea_unit"
-                    else:
-                        await transport.read()
-                except AtreaConnectionError:
-                    errors["base"] = "cannot_connect"
+            transport = HttpTransport(
+                host, port, password, async_get_clientsession(self.hass)
+            )
+            try:
+                if not await transport.is_atrea_unit():
+                    errors["base"] = "not_atrea_unit"
                 else:
-                    if not errors:
-                        return self.async_update_reload_and_abort(
-                            reconfigure_entry,
-                            data_updates={
-                                CONF_IP_ADDRESS: host,
-                                CONF_PORT: port,
-                                CONF_NAME: name,
-                            },
-                        )
-                finally:
-                    await transport.close()
+                    await transport.read()
+            except AtreaAuthError:
+                errors["base"] = "invalid_auth"
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
             else:
-                http = HttpTransport(
-                    host, port, password, async_get_clientsession(self.hass)
-                )
-                try:
-                    if not await http.is_atrea_unit():
-                        errors["base"] = "not_atrea_unit"
-                    else:
-                        await http.read()
-                except AtreaAuthError:
-                    errors["base"] = "invalid_auth"
-                except AtreaConnectionError:
-                    errors["base"] = "cannot_connect"
-                else:
-                    if not errors:
-                        return self.async_update_reload_and_abort(
-                            reconfigure_entry,
-                            data_updates={
-                                CONF_IP_ADDRESS: host,
-                                CONF_PORT: port,
-                                CONF_PASSWORD: password,
-                                CONF_NAME: name,
-                            },
-                        )
+                if not errors:
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        data={
+                            CONF_TRANSPORT: TRANSPORT_HTTP,
+                            CONF_IP_ADDRESS: host,
+                            CONF_PORT: port,
+                            CONF_PASSWORD: password,
+                            CONF_NAME: name,
+                        },
+                    )
 
         data = reconfigure_entry.data
         return self.async_show_form(
-            step_id="reconfigure",
+            step_id="reconfigure_http",
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -257,6 +258,66 @@ class AtreaConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")
                     ): str,
+                    vol.Optional(
+                        CONF_NAME, default=data.get(CONF_NAME, "Atrea")
+                    ): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure_modbus(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect and validate Modbus TCP details for a reconfigure."""
+        errors: dict[str, str] = {}
+        reconfigure_entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            host = user_input[CONF_IP_ADDRESS]
+            port = user_input[CONF_PORT]
+            slave_id = user_input[CONF_SLAVE_ID]
+            name = user_input.get(CONF_NAME, "Atrea")
+
+            await self.async_set_unique_id(host)
+            self._abort_if_unique_id_mismatch()
+
+            transport = ModbusTransport(host, port, slave_id)
+            try:
+                await transport.connect()
+                if not await transport.is_atrea_unit():
+                    errors["base"] = "not_atrea_unit"
+                else:
+                    await transport.read()
+            except AtreaConnectionError:
+                errors["base"] = "cannot_connect"
+            else:
+                if not errors:
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        data={
+                            CONF_TRANSPORT: TRANSPORT_MODBUS,
+                            CONF_IP_ADDRESS: host,
+                            CONF_PORT: port,
+                            CONF_SLAVE_ID: slave_id,
+                            CONF_NAME: name,
+                        },
+                    )
+            finally:
+                await transport.close()
+
+        data = reconfigure_entry.data
+        return self.async_show_form(
+            step_id="reconfigure_modbus",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_IP_ADDRESS, default=data.get(CONF_IP_ADDRESS)
+                    ): str,
+                    vol.Required(CONF_PORT, default=data.get(CONF_PORT, 502)): int,
+                    vol.Required(
+                        CONF_SLAVE_ID, default=data.get(CONF_SLAVE_ID, 1)
+                    ): int,
                     vol.Optional(
                         CONF_NAME, default=data.get(CONF_NAME, "Atrea")
                     ): str,

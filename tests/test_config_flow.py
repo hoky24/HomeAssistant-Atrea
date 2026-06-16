@@ -17,6 +17,17 @@ def _http_patch():
     return p, c
 
 
+def _modbus_patch():
+    p = patch("custom_components.atrea.config_flow.ModbusTransport")
+    cls = p.start()
+    c = cls.return_value
+    c.connect = AsyncMock()
+    c.is_atrea_unit = AsyncMock(return_value=True)
+    c.read = AsyncMock(return_value={"H10705": "2"})
+    c.close = AsyncMock()
+    return p, c
+
+
 async def _start_http(hass):
     """Init the flow and advance the transport-select step to the http step."""
     result = await hass.config_entries.flow.async_init(
@@ -168,19 +179,49 @@ async def test_options_flow_creates_entry(hass):
     assert CONF_PRESETS in result["data"]
 
 
+async def _start_reconfigure_http(hass, entry):
+    """Start reconfigure and advance the picker to the http sub-step."""
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"transport": "http"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_http"
+    return result
+
+
+async def _start_reconfigure_modbus(hass, entry):
+    """Start reconfigure and advance the picker to the modbus sub-step."""
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"transport": "modbus"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_modbus"
+    return result
+
+
 async def test_reconfigure_flow_updates_entry(hass):
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=2,
         unique_id="1.2.3.4",
-        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+        data={
+            "transport": "http",
+            "ip_address": "1.2.3.4",
+            "port": 80,
+            "password": "x",
+            "name": "Atrea",
+        },
     )
     entry.add_to_hass(hass)
     p, _ = _http_patch()
     try:
-        result = await entry.start_reconfigure_flow(hass)
-        assert result["type"] is FlowResultType.FORM
-        assert result["step_id"] == "reconfigure"
+        result = await _start_reconfigure_http(hass, entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {
@@ -196,6 +237,7 @@ async def test_reconfigure_flow_updates_entry(hass):
     assert result["reason"] == "reconfigure_successful"
     assert entry.data["port"] == 81
     assert entry.data["password"] == "y"
+    assert entry.data["transport"] == "http"
 
 
 async def test_reconfigure_flow_invalid_auth(hass):
@@ -203,13 +245,19 @@ async def test_reconfigure_flow_invalid_auth(hass):
         domain=DOMAIN,
         version=2,
         unique_id="1.2.3.4",
-        data={"ip_address": "1.2.3.4", "port": 80, "password": "x", "name": "Atrea"},
+        data={
+            "transport": "http",
+            "ip_address": "1.2.3.4",
+            "port": 80,
+            "password": "x",
+            "name": "Atrea",
+        },
     )
     entry.add_to_hass(hass)
     p, c = _http_patch()
     c.read = AsyncMock(side_effect=AtreaAuthError("denied"))
     try:
-        result = await entry.start_reconfigure_flow(hass)
+        result = await _start_reconfigure_http(hass, entry)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {
@@ -223,3 +271,163 @@ async def test_reconfigure_flow_invalid_auth(hass):
         p.stop()
     assert result["type"] is FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_reconfigure_picker_defaults_to_current_transport(hass):
+    """The picker step shows and accepts the stored transport as default."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={
+            "transport": "modbus",
+            "ip_address": "1.2.3.4",
+            "port": 502,
+            "slave_id": 1,
+            "name": "Atrea",
+        },
+    )
+    entry.add_to_hass(hass)
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+
+async def test_reconfigure_http_to_modbus_drops_password(hass):
+    """Switching an HTTP entry to Modbus must replace data and drop password."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={
+            "transport": "http",
+            "ip_address": "1.2.3.4",
+            "port": 80,
+            "password": "x",
+            "name": "Atrea",
+        },
+    )
+    entry.add_to_hass(hass)
+    p, _ = _modbus_patch()
+    try:
+        result = await _start_reconfigure_modbus(hass, entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "1.2.3.4",
+                "port": 502,
+                "slave_id": 3,
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["transport"] == "modbus"
+    assert entry.data["slave_id"] == 3
+    assert "password" not in entry.data
+
+
+async def test_reconfigure_modbus_to_http_drops_slave_id(hass):
+    """Switching a Modbus entry to HTTP must replace data and drop slave_id."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={
+            "transport": "modbus",
+            "ip_address": "1.2.3.4",
+            "port": 502,
+            "slave_id": 1,
+            "name": "Atrea",
+        },
+    )
+    entry.add_to_hass(hass)
+    p, _ = _http_patch()
+    try:
+        result = await _start_reconfigure_http(hass, entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "1.2.3.4",
+                "port": 80,
+                "password": "secret",
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data["transport"] == "http"
+    assert entry.data["password"] == "secret"
+    assert "slave_id" not in entry.data
+
+
+async def test_reconfigure_unique_id_mismatch_aborts(hass):
+    """Changing the IP to a different unit aborts with unique_id_mismatch."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={
+            "transport": "http",
+            "ip_address": "1.2.3.4",
+            "port": 80,
+            "password": "x",
+            "name": "Atrea",
+        },
+    )
+    entry.add_to_hass(hass)
+    p, _ = _http_patch()
+    try:
+        result = await _start_reconfigure_http(hass, entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "9.9.9.9",
+                "port": 80,
+                "password": "x",
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+
+
+async def test_reconfigure_http_not_atrea_unit(hass):
+    """A non-Atrea unit re-shows the http sub-step with not_atrea_unit."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id="1.2.3.4",
+        data={
+            "transport": "http",
+            "ip_address": "1.2.3.4",
+            "port": 80,
+            "password": "x",
+            "name": "Atrea",
+        },
+    )
+    entry.add_to_hass(hass)
+    p, c = _http_patch()
+    c.is_atrea_unit = AsyncMock(return_value=False)
+    try:
+        result = await _start_reconfigure_http(hass, entry)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "ip_address": "1.2.3.4",
+                "port": 80,
+                "password": "x",
+                "name": "Atrea",
+            },
+        )
+    finally:
+        p.stop()
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_http"
+    assert result["errors"]["base"] == "not_atrea_unit"
